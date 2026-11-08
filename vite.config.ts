@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 export default defineConfig(({ mode }) => ({
   root: "frontend",
+  optimizeDeps: { include: ["@noble/hashes/sha2.js"] },
   base: loadEnv(mode, ".", "VITE_").VITE_BASE_PATH || "/",
   plugins: [
     react(),

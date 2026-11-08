@@ -62,6 +62,7 @@ test("real MP3 playback, pause, seek and IndexedDB restoration", async ({
   await page.getByRole("button", { name: "閉じる", exact: true }).click();
   await page.waitForTimeout(600);
   await page.reload();
+  await page.getByRole("button", { name: "すべての曲", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "toneを再生", exact: true }),
   ).toBeVisible();
@@ -95,4 +96,141 @@ test("offline parser remains responsive when backend search fails", async ({
       : page.getByRole("navigation", { name: "メインナビゲーション" });
   await nav.getByRole("link", { name: "ホーム", exact: true }).click();
   await expect(page.getByRole("heading", { name: /音楽に/ })).toBeVisible();
+});
+
+test("bulk preview confirms chosen candidates in the pasted order", async ({
+  page,
+}) => {
+  await page.route("**/api/search?**", (route) => {
+    const query = new URL(route.request().url()).searchParams.get("q") || "";
+    const suffix = query.includes("Song A") ? "A" : "B";
+    const id = suffix === "A" ? "aaaaaaaaaaa" : "bbbbbbbbbbb";
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          {
+            id: "yt:" + id,
+            title: "Song " + suffix,
+            artist: "Artist " + suffix,
+            duration: 100,
+            thumbnail: "",
+            sources: [
+              {
+                id: "youtube:" + id,
+                provider: "youtube",
+                videoId: id,
+                url: "https://www.youtube.com/watch?v=" + id,
+                kind: "unknown",
+                official: false,
+                evidence: "test fixture",
+              },
+            ],
+          },
+        ],
+        nextPageToken: "",
+        provider: "local-test-fixture",
+      }),
+    });
+  });
+  await page.goto("/#ai");
+  await page
+    .getByLabel("曲一覧・YouTube URL", { exact: true })
+    .fill("Artist B - Song B\nArtist A - Song A");
+  await page.getByRole("button", { name: "解析して候補を探す" }).click();
+  await page
+    .getByLabel("1行目の候補", { exact: true })
+    .selectOption("yt:bbbbbbbbbbb");
+  await page
+    .getByLabel("2行目の候補", { exact: true })
+    .selectOption("yt:aaaaaaaaaaa");
+  await page.getByRole("button", { name: "2曲を確定" }).click();
+  await expect(
+    page.getByRole("heading", { name: "新しいプレイリスト", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".track-info strong")).toHaveText([
+    "Song B",
+    "Song A",
+  ]);
+  await page.reload();
+  await expect(page.locator(".track-info strong")).toHaveText([
+    "Song B",
+    "Song A",
+  ]);
+});
+
+test("a large restored library scrolls with a bounded rendered row count", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const settings = page.viewportSize()!.width < 761 ? "設定" : "設定・接続";
+  await page.getByRole("button", { name: settings, exact: true }).click();
+  const tracks = Object.fromEntries(
+    Array.from({ length: 1000 }, (_, i) => {
+      const id = "local:" + i;
+      return [
+        id,
+        {
+          id,
+          title: "Track " + i,
+          artist: "Test artist",
+          duration: 10,
+          thumbnail: "",
+          sources: [
+            {
+              id,
+              provider: "local",
+              url: "",
+              kind: "local",
+              evidence: "test fixture",
+              official: false,
+            },
+          ],
+        },
+      ];
+    }),
+  );
+  const backup = {
+    schema: 1,
+    tracks,
+    artists: {},
+    albums: {},
+    playlists: [],
+    favorites: [],
+    queue: [],
+    currentId: null,
+    position: 0,
+    history: [],
+    settings: {
+      apiUrl: "",
+      token: "",
+      volume: 0.8,
+      repeat: "none",
+      shuffle: false,
+      language: "ja",
+    },
+  };
+  await page
+    .locator('input[type=file][accept=".json,application/json"]')
+    .setInputFiles({
+      name: "test-library.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(backup)),
+    });
+  await expect(page.getByRole("status")).toContainText(
+    "バックアップを復元しました",
+  );
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
+  const nav =
+    page.viewportSize()!.width < 761
+      ? page.getByRole("navigation", { name: "モバイルナビゲーション" })
+      : page.getByRole("navigation", { name: "メインナビゲーション" });
+  await nav.getByRole("link", { name: "ライブラリ", exact: true }).click();
+  await page.getByRole("button", { name: "すべての曲", exact: true }).click();
+  await expect(page.getByText("Track 0", { exact: true })).toBeVisible();
+  expect(await page.locator(".track-row").count()).toBeLessThan(60);
+  await page.locator(".virtual-list").hover();
+  await page.mouse.wheel(0, 100000);
+  await expect(page.getByText("Track 999", { exact: true })).toBeVisible();
 });

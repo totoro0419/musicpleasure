@@ -209,20 +209,32 @@ export const useStore = create<State>((set, get) => ({
   },
 }));
 let saveTimer: ReturnType<typeof setTimeout>;
-useStore.subscribe((s) => {
+useStore.subscribe((s, previous) => {
   if (!s.loaded) return;
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    saveSnapshot(snapshot(useStore.getState())).catch(
-      () =>
-        !useStore.getState().saveError &&
+  const persist = () => {
+    void saveSnapshot(snapshot(useStore.getState())).catch(() => {
+      if (!useStore.getState().saveError)
         useStore.setState({
           saveError:
             "端末への保存に失敗しました。空き容量を確認してバックアップを書き出してください",
-        }),
-    );
-  }, 400);
+        });
+    });
+  };
+  // Library and queue edits start an IndexedDB transaction immediately.
+  // Only continuous playback position/volume changes are coalesced.
+  if (
+    !previous.loaded ||
+    s.tracks !== previous.tracks ||
+    s.playlists !== previous.playlists ||
+    s.favorites !== previous.favorites ||
+    s.queue !== previous.queue ||
+    s.currentId !== previous.currentId
+  )
+    persist();
+  else saveTimer = setTimeout(persist, 200);
 });
+
 export async function loadStore() {
   try {
     const v = await db.snapshots.get("current");

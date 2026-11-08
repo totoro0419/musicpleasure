@@ -959,7 +959,10 @@ export default function App() {
                       }
                     />
                     <details className="action-menu">
-                      <summary aria-label="プレイリストのメニュー">
+                      <summary
+                        role="button"
+                        aria-label="プレイリストのメニュー"
+                      >
                         <Ellipsis />
                       </summary>
                       <div>
@@ -1112,7 +1115,7 @@ export default function App() {
                   {e.id === s.currentId && <Activity size={16} />}
                 </button>
                 <details className="action-menu">
-                  <summary aria-label="キューの曲操作">
+                  <summary role="button" aria-label="キューの曲操作">
                     <Ellipsis size={17} />
                   </summary>
                   <div>
@@ -1744,7 +1747,7 @@ function TrackList({
           onClick={() => addTo([t])}
         />
         <details className="action-menu">
-          <summary aria-label={`${t.title}の操作`}>
+          <summary role="button" aria-label={`${t.title}の操作`}>
             <Ellipsis size={20} />
           </summary>
           <div>

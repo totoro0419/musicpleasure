@@ -31,7 +31,7 @@ def track(raw):
     title=html.unescape(snippet.get('title',raw.get('title','名称未取得')))
     thumbs=snippet.get('thumbnails',{})
     kind,evidence=classify(title)
-    return {'id':f'yt:{vid}','title':title,'artist':html.unescape(snippet.get('videoOwnerChannelTitle',snippet.get('channelTitle',raw.get('channel',raw.get('uploader','未確認')))) or '未確認'), 'duration':seconds(raw.get('contentDetails',{}).get('duration','')) or raw.get('duration') or 0,'thumbnail':thumbs.get('medium',thumbs.get('default',{})).get('url',raw.get('thumbnail','')) or '', 'sources':[{'id':f'youtube:{vid}','provider':'youtube','videoId':vid,'url':f'https://www.youtube.com/watch?v={vid}','kind':kind,'evidence':evidence,'official':False}]}
+    return {'id':f'yt:{vid}','title':title,'artist':html.unescape(snippet.get('videoOwnerChannelTitle',snippet.get('channelTitle',raw.get('channel',raw.get('uploader','未確認')))) or '未確認'), 'duration':seconds(raw.get('contentDetails',{}).get('duration','')) or raw.get('duration') or 0,'thumbnail':thumbs.get('medium',thumbs.get('default',{})).get('url',raw.get('thumbnail',(raw.get('thumbnails') or [{}])[-1].get('url',''))) or '', 'sources':[{'id':f'youtube:{vid}','provider':'youtube','videoId':vid,'url':f'https://www.youtube.com/watch?v={vid}','kind':kind,'evidence':evidence,'official':False}]}
 
 class YouTube:
     def __init__(self,key,quota=8000):
@@ -47,7 +47,7 @@ class YouTube:
     async def extract(self,target):
         # target is constructed internally from a validated ID or bounded search string.
         async with self.limit:
-            p=await asyncio.create_subprocess_exec(sys.executable,'-m','yt_dlp','--ignore-config','--no-warnings','--flat-playlist','--dump-single-json','--socket-timeout','15','--',target,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+            p=await asyncio.create_subprocess_exec(sys.executable,'-m','yt_dlp','--compat-options','no-certifi','--js-runtimes','node','--ignore-config','--no-warnings','--flat-playlist','--dump-single-json','--socket-timeout','15','--',target,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
             try:
                 out,err=await asyncio.wait_for(p.communicate(),50)
             except (TimeoutError,asyncio.CancelledError):

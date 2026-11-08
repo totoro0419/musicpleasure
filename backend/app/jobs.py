@@ -88,7 +88,7 @@ class Jobs:
         ident=j['id'];temp=self.root/f'tmp-{ident}';temp.mkdir(exist_ok=True)
         self.update(ident,state='downloading',attempt=j['attempt']+1,error=None)
         # No shell, arbitrary URLs, config loading, playlists, cookies, or executable hooks.
-        args=[sys.executable,'-m','yt_dlp','--ignore-config','--js-runtimes','node','--no-playlist','--no-warnings','--newline','--progress','--progress-template','download:%(progress._percent_str)s','--socket-timeout','15','--retries','1','--fragment-retries','1','--max-filesize','150M','--match-filter','duration <= 1800','-f','bestaudio/best','-x','--audio-format','mp3','--audio-quality','192K','--restrict-filenames','-o',str(temp/'audio.%(ext)s'),'--',f"https://www.youtube.com/watch?v={j['videoId']}"]
+        args=[sys.executable,'-m','yt_dlp','--compat-options','no-certifi','--js-runtimes','node','--ignore-config','--no-playlist','--no-warnings','--newline','--progress','--progress-template','download:%(progress._percent_str)s','--socket-timeout','15','--retries','1','--fragment-retries','1','--max-filesize','150M','--match-filter','duration <= 1800','-f','bestaudio/best','-x','--audio-format','mp3','--audio-quality','192K','--restrict-filenames','-o',str(temp/'audio.%(ext)s'),'--',f"https://www.youtube.com/watch?v={j['videoId']}"]
         p=await asyncio.create_subprocess_exec(*args,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.STDOUT,env={**os.environ,'PYTHONUNBUFFERED':'1'});self.procs[ident]=p
         async def monitor():
             logs=[];last=0

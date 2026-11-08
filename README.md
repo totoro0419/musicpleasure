@@ -52,7 +52,7 @@ npm test
 .venv/bin/python -m pytest -q
 # ブラウザ試験（通常の開発環境 / CI）
 npx playwright install chromium
-npm run e2e
+npm run build && npm run e2e
 ```
 
 ## APIとキー
@@ -118,8 +118,8 @@ Bearer認証・origin制限・毎分180リクエスト/クライアント・入�
 - pytest: URL/ID・認証・ページング（55曲のテスト応答）・公式性を捏造しないメタデータ・ジョブ重複/再試行/復旧・実FFmpeg変換/デコード・音声配信/Range・失敗後のAPI応答。
 - Playwright: PC / Pixel 7相当 / タブレット相当で作成・復元・オーバーフロー・実テストMP3再生/停止/シーク・接続失敗からの操作をCIで実行します。モバイルエミュレーションは実機検証とは区別します。
 - `backend/tests/fixtures/tone.mp3` はFFmpegで生成した8秒の440Hzテスト音で、製品の楽曲データには追加しません。
-- 実YouTube・AI通信はキー・ネットワーク・外部サービスに依存します。初期作業環境ではYouTube接続が証明書検証エラーで失敗し、実取得は未確認です。AIキー未設定のため実AI応答は未確認です。
-- Dockerコマンドがない作業環境のため、Dockerイメージの実ビルドはCIへ委ねています。Android/Windows実機、画面読み上げ、バックグラウンド再生の端末差は未確認です。
+- 実YouTube・AI通信はキー・ネットワーク・外部サービスに依存します。初期の証明書検証エラーをシステムの信頼済みCA利用で解消し、実YouTube検索25件の取得を確認しました。実YouTube音声の取得は試行した動画で失敗しており、成功は未確認です。AIキー未設定のため実AI応答は未確認です。
+- Dockerイメージ（フロントエンド・バックエンド）はGitHub Actions上でビルド成功を確認しました。Android/Windows実機、画面読み上げ、バックグラウンド再生の端末差は未確認です。
 
 ## トラブルシューティング
 
