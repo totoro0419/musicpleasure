@@ -272,14 +272,18 @@ export default function App() {
   }, [playback.cacheRevision]);
   const health = useQuery({
     queryKey: ["health", s.settings.apiUrl, s.settings.token],
-    queryFn: () =>
-      api<{
+    queryFn: async () => {
+      const health = await api<{
         status: string;
         youtubeApi: boolean;
         ai: boolean;
         ffmpeg: boolean;
         downloader: boolean;
-      }>("/health"),
+        authentication: boolean;
+      }>("/health");
+      if (health.authentication) await api("/jobs");
+      return health;
+    },
     retry: false,
     refetchInterval: 60000,
   });
@@ -906,6 +910,7 @@ export default function App() {
               view={view}
               onCreate={createPlaylist}
               openPlaylist={openPlaylist}
+              navigate={go}
               importFiles={() => fileRef.current?.click()}
               {...listProps}
             />
@@ -1913,12 +1918,14 @@ function LibraryView({
   view,
   onCreate,
   openPlaylist,
+  navigate,
   importFiles,
   ...props
 }: {
   view: View;
   onCreate: () => void;
   openPlaylist: (id: string) => void;
+  navigate: (view: View) => void;
   importFiles: () => void;
 } & ListProps) {
   const s = useStore(),
@@ -1926,7 +1933,9 @@ function LibraryView({
     [filter, setFilter] = useState(""),
     [sort, setSort] = useState("added");
   const tracks = localSearch(Object.values(s.tracks), filter).filter((t) =>
-    view === "favorites" ? s.favorites.includes(t.id) : true,
+    view === "favorites" || tab === "favorites"
+      ? s.favorites.includes(t.id)
+      : true,
   );
   if (sort === "title")
     tracks.sort((a, b) => a.title.localeCompare(b.title, "ja"));
@@ -1964,11 +1973,15 @@ function LibraryView({
             [
               ["playlists", "プレイリスト"],
               ["tracks", "すべての曲"],
+              ["favorites", "お気に入り"],
+              ["downloads", "保存管理"],
             ].map(([id, label]) => (
               <button
                 key={id}
                 className={tab === id ? "active" : ""}
-                onClick={() => setTab(id)}
+                onClick={() =>
+                  id === "downloads" ? navigate("downloads") : setTab(id)
+                }
               >
                 {label}
               </button>

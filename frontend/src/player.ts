@@ -89,6 +89,7 @@ export async function ensureAudio(track: Track): Promise<Blob> {
 let generation = 0,
   objectUrl = "",
   intent = false,
+  loading = false,
   lastSave = 0,
   recorded = false;
 export async function startCurrent(resume = true) {
@@ -98,7 +99,10 @@ export async function startCurrent(resume = true) {
   if (!t) return;
   const run = ++generation;
   intent = resume;
+  loading = true;
   audio.pause();
+  audio.removeAttribute("src");
+  audio.load();
   recorded = false;
   usePlayback.setState({
     status: "loading",
@@ -109,6 +113,7 @@ export async function startCurrent(resume = true) {
   try {
     const blob = await ensureAudio(t);
     if (run !== generation) return;
+    loading = false;
     if (objectUrl) URL.revokeObjectURL(objectUrl);
     objectUrl = URL.createObjectURL(blob);
     audio.src = objectUrl;
@@ -138,11 +143,13 @@ export async function startCurrent(resume = true) {
     if (intent) await audio.play();
     else usePlayback.setState({ status: "paused" });
   } catch (e) {
-    if (run === generation)
+    if (run === generation) {
+      loading = false;
       usePlayback.setState({
         status: "error",
         error: e instanceof Error ? e.message : "音声を再生できませんでした",
       });
+    }
   }
 }
 export async function playTracks(ts: Track[], index = 0) {
@@ -151,12 +158,12 @@ export async function playTracks(ts: Track[], index = 0) {
 }
 export async function togglePlayback() {
   const status = usePlayback.getState().status;
-  if (status === "playing") {
-    intent = false;
-    audio.pause();
-  } else if (status === "loading") {
+  if (loading) {
     intent = !intent;
     usePlayback.setState({ status: intent ? "loading" : "paused" });
+  } else if (status === "playing") {
+    intent = false;
+    audio.pause();
   } else if (audio.src && status === "paused") {
     intent = true;
     try {
@@ -211,6 +218,7 @@ export function selectQueue(id: string) {
 }
 export function clearPlayback() {
   generation++;
+  loading = false;
   intent = false;
   audio.pause();
   audio.removeAttribute("src");
@@ -221,8 +229,12 @@ export function clearPlayback() {
   usePlayback.setState({ status: "idle", time: 0, duration: 0, error: "" });
 }
 export function shuffleQueue() {
-  const s = useStore.getState(),
-    others = s.queue.filter((q) => q.id !== s.currentId);
+  const s = useStore.getState();
+  if (s.settings.shuffle) {
+    s.settingsUpdate({ shuffle: false });
+    return;
+  }
+  const others = s.queue.filter((q) => q.id !== s.currentId);
   for (let i = others.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [others[i], others[j]] = [others[j], others[i]];
@@ -278,9 +290,17 @@ useStore.subscribe((s) => {
 if ("mediaSession" in navigator) {
   for (const [action, handler] of Object.entries({
     play: () => {
-      void togglePlayback();
+      if (loading) {
+        intent = true;
+        usePlayback.setState({ status: "loading" });
+      } else if (usePlayback.getState().status !== "playing")
+        void togglePlayback();
     },
-    pause: () => audio.pause(),
+    pause: () => {
+      intent = false;
+      audio.pause();
+      if (loading) usePlayback.setState({ status: "paused" });
+    },
     nexttrack: () => {
       void next();
     },

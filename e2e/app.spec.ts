@@ -234,3 +234,17 @@ test("a large restored library scrolls with a bounded rendered row count", async
   await page.mouse.wheel(0, 100000);
   await expect(page.getByText("Track 999", { exact: true })).toBeVisible();
 });
+
+test("collections and storage remain reachable from the library on every layout", async ({
+  page,
+}) => {
+  await page.goto("/#library");
+  await page.getByRole("button", { name: "お気に入り", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "まだ、まっさらなライブラリ。" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "保存管理", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "ダウンロードと保存", exact: true }),
+  ).toBeVisible();
+});
