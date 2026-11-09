@@ -1,6 +1,7 @@
 import type { Data, Track, RadioMode } from "../types";
 import { fromItem, unique } from "./model";
 import { piped } from "./piped";
+import { reliability } from "./reliability";
 export const isCover = (s: string) =>
   /歌ってみた|cover|カバー|歌いました|歌わせて/i.test(s);
 export const words = (s: string) =>
@@ -25,7 +26,7 @@ export function rankCandidates(
   const excluded = new Set([...data.queue, ...data.disliked, seed.id]);
   return unique(candidates.map((t) => t.id))
     .map((id) => candidates.find((t) => t.id === id)!)
-    .filter((t) => !excluded.has(t.id))
+    .filter((t) => !excluded.has(t.id) && !reliability.isExcluded(t.id))
     .map((t) => {
       let score = 0;
       const reasons: string[] = [];
@@ -43,16 +44,14 @@ export function rankCandidates(
         score += weights.favorite * 4;
         reasons.push("保存したチャンネル");
       }
+      score -= (listening?.failed || 0) * 12;
       if (!listening?.plays) {
         score +=
           weights.fresh * (data.settings.discovery / 30) +
           (mode === "discovery" ? 15 : 0);
         reasons.push("まだ聴いていない曲");
       } else {
-        score +=
-          Math.min(8, listening.seconds / 600) -
-          listening.skips * 4 -
-          listening.failed * 12;
+        score += Math.min(8, listening.seconds / 600) - listening.skips * 4;
         if (Date.now() - listening.last < 86400000) score -= weights.recent * 3;
       }
       if (t.duration > 900) score -= 15;

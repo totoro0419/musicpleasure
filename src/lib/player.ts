@@ -1,5 +1,7 @@
-import { piped, compatibleStreams } from "./piped";
-import type { Settings, Track, StreamInfo } from "../types";
+import { piped } from "./piped";
+import type { Settings, Track } from "../types";
+import { classify, PlaybackError, reliability } from "./reliability";
+import { StreamResolver, type PreparedAudio } from "./streams";
 export type PlaybackStatus =
   "idle" | "loading" | "playing" | "paused" | "blocked" | "error" | "ended";
 export interface PlaybackState {
@@ -11,8 +13,14 @@ export interface PlaybackState {
   trackId: string;
   instance: string;
 }
+export type LoadResult =
+  | { status: "playing" }
+  | { status: "blocked" }
+  | { status: "cancelled" }
+  | { status: "failed"; error: PlaybackError };
 export class MusicPlayer {
   audio = new Audio();
+  resolver: StreamResolver;
   state: PlaybackState = {
     status: "idle",
     engine: null,
@@ -22,16 +30,19 @@ export class MusicPlayer {
     trackId: "",
     instance: "",
   };
-  onState = (s: PlaybackState) => {};
+  onState = (_s: PlaybackState) => {};
   onEnded = () => {};
   onMetadata = (_track: Track) => {};
-  onFailure = (_id: string) => {};
+  onFailure = (_id: string, _error?: PlaybackError) => {};
   onListen = (_seconds: number) => {};
+  onIntent = (_kind: "stop" | "pause") => {};
+  onTerminalFailure = (_id: string) => {};
   private epoch = 0;
   private abort?: AbortController;
   private endedEpoch = -1;
   private wantsPlay = false;
   private recovering = false;
+  private recoveries = 0;
   private current?: Track;
   private settings?: Settings;
   private watchdog?: ReturnType<typeof setTimeout>;
@@ -39,33 +50,53 @@ export class MusicPlayer {
   private lastProgress = 0;
   private audioConfirmed = false;
   private stallAt = 0;
-  private recoveries = 0;
-  private prefetchCache = new Map<
-    string,
-    { at: number; info: StreamInfo; instance: string }
-  >();
-  constructor() {
-    this.audio.preload = "metadata";
+  private expectedSrc = "";
+  private started = false;
+  constructor(resolver?: StreamResolver) {
+    this.resolver =
+      resolver || new StreamResolver((type) => this.audio.canPlayType(type));
+    this.audio.preload = "auto";
     this.audio.volume = 0.8;
     setInterval(() => this.tick(), 500);
-    this.audio.addEventListener("ended", () => {
-      if (this.state.engine === "piped" && this.wantsPlay) this.finish();
-    });
+    document.addEventListener("visibilitychange", () => this.tick());
     this.audio.addEventListener("playing", () => {
-      if (this.state.engine !== "piped" || !this.wantsPlay) {
+      if (!this.activeSource() || !this.wantsPlay) {
         this.audio.pause();
         return;
       }
+      this.started = true;
       this.set({ status: "playing", message: "" });
       this.stallAt = 0;
       this.armWatchdog(false);
     });
-    this.audio.addEventListener("waiting", () => this.armWatchdog());
+    this.audio.addEventListener("ended", () => {
+      if (
+        this.activeSource() &&
+        this.started &&
+        this.wantsPlay &&
+        this.endedEpoch !== this.epoch
+      ) {
+        this.endedEpoch = this.epoch;
+        this.wantsPlay = false;
+        this.armWatchdog(false);
+        this.set({ status: "ended" });
+        this.onEnded();
+      }
+    });
+    this.audio.addEventListener("waiting", () => {
+      if (this.started) this.armWatchdog();
+    });
     this.audio.addEventListener("error", () => {
-      if (this.state.engine === "piped" && this.state.status === "playing")
+      if (this.activeSource() && this.state.status === "playing")
         void this.recover();
     });
-    document.addEventListener("visibilitychange", () => this.tick());
+  }
+  private activeSource() {
+    return (
+      this.state.engine === "piped" &&
+      !!this.expectedSrc &&
+      (this.audio.currentSrc || this.audio.src) === this.expectedSrc
+    );
   }
   private set(patch: Partial<PlaybackState>) {
     this.state = { ...this.state, ...patch };
@@ -77,46 +108,43 @@ export class MusicPlayer {
         if (this.state.duration > 0)
           navigator.mediaSession.setPositionState({
             duration: this.state.duration,
-            playbackRate: 1,
             position: Math.min(this.state.duration, this.state.position),
+            playbackRate: 1,
           });
       } catch {}
     }
   }
   private tick() {
-    const now = Date.now();
-    const position = this.audio.currentTime || 0;
-    if (this.state.status === "playing") {
-      if (this.lastTick && position > this.lastProgress)
-        this.onListen(Math.min(2, (now - this.lastTick) / 1000));
-      this.lastTick = now;
-      if (position === this.lastProgress) {
-        if (!this.stallAt) this.stallAt = now;
-        else if (now - this.stallAt > 12000) void this.recover();
-      } else {
+    if (!this.activeSource()) return;
+    const now = Date.now(),
+      position = this.audio.currentTime || 0;
+    if (
+      this.state.status === "playing" &&
+      !this.audio.paused &&
+      !this.audio.seeking
+    ) {
+      const advanced = position > this.lastProgress + 0.02;
+      if (advanced) {
+        if (this.lastTick)
+          this.onListen(Math.min(2, (now - this.lastTick) / 1000));
         this.stallAt = 0;
-        if (this.state.instance && this.lastProgress === 0 && position > 0) {
+        if (!this.audioConfirmed) {
           this.audioConfirmed = true;
           piped.audioSuccess(this.state.instance);
+          reliability.success(this.state.trackId, this.state.instance);
         }
-      }
+      } else if (this.stallAt && now - this.stallAt > 12000)
+        void this.recover();
+      else if (!this.stallAt) this.stallAt = now;
+      this.lastTick = now;
     } else this.lastTick = 0;
     this.lastProgress = position;
-    if (this.state.engine === "piped")
-      this.set({
-        position,
-        duration: Number.isFinite(this.audio.duration)
-          ? this.audio.duration
-          : this.state.duration,
-      });
-  }
-  private finish() {
-    if (this.endedEpoch === this.epoch) return;
-    this.endedEpoch = this.epoch;
-    this.wantsPlay = false;
-    this.armWatchdog(false);
-    this.set({ status: "ended" });
-    this.onEnded();
+    this.set({
+      position,
+      duration: Number.isFinite(this.audio.duration)
+        ? this.audio.duration
+        : this.state.duration,
+    });
   }
   private armWatchdog(active = true) {
     clearTimeout(this.watchdog);
@@ -126,36 +154,92 @@ export class MusicPlayer {
   private async recover() {
     if (this.recovering || !this.current || !this.settings || !this.wantsPlay)
       return;
-    if (++this.recoveries > 2) {
-      this.pause();
-      this.set({
-        status: "error",
-        message:
-          "Pipedの音声が繰り返し停止しました。接続先の再評価後に再試行してください。",
-      });
-      return;
-    }
     this.recovering = true;
-    const pos = this.state.position;
-    piped.failure(this.state.instance, "音声が停止したため別のPipedで再取得");
+    const id = this.current.id;
+    const error = new PlaybackError(
+      "timeout",
+      "再生中の音声が停止しました",
+      "play",
+      this.state.instance,
+    );
+    piped.audioResult(this.state.instance, "failure", error);
+    reliability.record({
+      trackId: id,
+      instance: this.state.instance,
+      stage: "play",
+      outcome: "failure",
+      kind: error.kind,
+      detail: error.message,
+    });
+    this.resolver.invalidate(id, this.expectedSrc);
     try {
-      await this.load(this.current, this.settings, pos, true);
+      if (++this.recoveries > 2) {
+        this.failed(this.current, error);
+        this.onTerminalFailure(id);
+        return;
+      }
+      const result = await this.load(
+        this.current,
+        this.settings,
+        this.state.position,
+        true,
+      );
+      if (result.status === "failed" && this.state.trackId === id)
+        this.onTerminalFailure(id);
     } finally {
       this.recovering = false;
     }
   }
-  stop() {
+  stop(intent = true) {
+    if (intent) this.onIntent("stop");
     this.epoch++;
     this.abort?.abort();
     this.wantsPlay = false;
+    this.started = false;
+    this.expectedSrc = "";
     this.audio.pause();
     this.audio.removeAttribute("src");
     this.audio.load();
     this.armWatchdog(false);
     this.set({ status: "idle", position: 0, engine: null });
   }
-  async load(track: Track, settings: Settings, position = 0, recovery = false) {
-    this.stop();
+  unavailable(track: Track, message: string) {
+    this.stop(false);
+    this.current = track;
+    this.set({
+      status: "error",
+      trackId: track.id,
+      duration: track.duration,
+      message,
+      instance: "",
+    });
+  }
+  private failed(track: Track, error: PlaybackError): LoadResult {
+    this.wantsPlay = false;
+    this.audio.pause();
+    this.armWatchdog(false);
+    this.resolver.invalidate(track.id);
+    reliability.block(track.id, error);
+    reliability.record({
+      trackId: track.id,
+      instance: error.instance || this.state.instance,
+      stage: error.stage,
+      outcome: "failure",
+      kind: error.kind,
+      status: error.status,
+      detail: error.message,
+    });
+    this.set({ status: "error", message: error.message });
+    this.onFailure(track.id, error);
+    return { status: "failed", error };
+  }
+  async load(
+    track: Track,
+    settings: Settings,
+    position = 0,
+    recovery = false,
+  ): Promise<LoadResult> {
+    this.stop(false);
     if (!recovery) this.recoveries = 0;
     const token = this.epoch;
     this.current = track;
@@ -164,14 +248,14 @@ export class MusicPlayer {
     this.abort = new AbortController();
     const signal = AbortSignal.any([
       this.abort.signal,
-      AbortSignal.timeout(25000),
+      AbortSignal.timeout(28000),
     ]);
     this.set({
       status: "loading",
       trackId: track.id,
       duration: track.duration,
       position,
-      message: "Pipedで音声を準備しています",
+      message: "Pipedの音声を確認しています",
       instance: "",
     });
     if ("mediaSession" in navigator)
@@ -180,129 +264,87 @@ export class MusicPlayer {
         artist: track.uploader,
         artwork: track.thumbnail ? [{ src: track.thumbnail }] : [],
       });
-    const errors: string[] = [];
     try {
-      piped.preferred = settings.instance;
-      const available = piped.ranked();
-      const cooling = piped.ranked(true).filter((h) => !available.includes(h));
-      const candidates = [...available, ...cooling].slice(0, 18);
-      for (let offset = 0; offset < candidates.length; offset += 3) {
-        if (token !== this.epoch) return;
-        signal.throwIfAborted();
-        this.set({
-          message: `Piped接続先を確認しています（${Math.min(offset + 3, candidates.length)} / ${candidates.length}）`,
-        });
-        const batch = candidates.slice(offset, offset + 3);
-        const results = await Promise.allSettled(
-          batch.map(async (h) => {
-            const cached = this.prefetchCache.get(track.id);
-            const info =
-              cached &&
-              Date.now() - cached.at < 45000 &&
-              cached.instance === h.url
-                ? cached.info
-                : await piped.at<StreamInfo>(
-                    h.url,
-                    `/streams/${track.id}`,
-                    signal,
-                    4500,
-                  );
-            if (!Array.isArray(info.audioStreams))
-              throw Error("音声情報の形式が不正です");
-            return { h, info };
-          }),
+      for (let round = 0; round < 2; round++) {
+        const prepared = await this.resolver.prepare(
+          track.id,
+          settings,
+          signal,
         );
-        for (let i = 0; i < results.length; i++) {
-          if (token !== this.epoch) return;
-          signal.throwIfAborted();
-          const result = results[i];
-          if (result.status === "rejected") {
-            errors.push(
-              `${new URL(batch[i].url).hostname}: ${String(result.reason).slice(0, 180)}`,
-            );
-            continue;
+        if (token !== this.epoch) return { status: "cancelled" };
+        this.onMetadata({
+          ...track,
+          title: prepared.info.title || track.title,
+          uploader: prepared.info.uploader || track.uploader,
+          thumbnail: prepared.info.thumbnailUrl || track.thumbnail,
+          duration: prepared.info.duration || track.duration,
+          uploaderUrl: prepared.info.uploaderUrl,
+        });
+        this.set({
+          engine: "piped",
+          instance: prepared.instance,
+          duration: prepared.info.duration || track.duration,
+          message: "確認済みのPiped音声を開始しています",
+        });
+        try {
+          await this.startAudio(prepared, position, signal);
+          if (token !== this.epoch) return { status: "cancelled" };
+          this.set({ status: "playing", message: "" });
+          return { status: "playing" };
+        } catch (e) {
+          if (token !== this.epoch) return { status: "cancelled" };
+          const error = classify(e, "play", prepared.instance);
+          if (error.kind === "autoplay_blocked") {
+            this.set({
+              status: "blocked",
+              message:
+                "再生ボタンを押して再開してください（ブラウザが再生を保留しました）",
+            });
+            reliability.record({
+              trackId: track.id,
+              instance: prepared.instance,
+              stage: "play",
+              outcome: "failure",
+              kind: error.kind,
+              detail: error.message,
+            });
+            return { status: "blocked" };
           }
-          const { h, info } = result.value;
-          this.set({ duration: info.duration || track.duration });
-          this.onMetadata({
-            ...track,
-            title: info.title || track.title,
-            uploader: info.uploader || track.uploader,
-            thumbnail: info.thumbnailUrl || track.thumbnail,
-            duration: info.duration || track.duration,
-            uploaderUrl: info.uploaderUrl,
+          this.audio.pause();
+          this.started = false;
+          this.set({
+            status: "loading",
+            message: "別のPiped音声で再試行しています",
           });
-          const streams = [
-            ...compatibleStreams(
-              info.audioStreams,
-              (s) => this.audio.canPlayType(s),
-              settings.quality,
-            ),
-            ...compatibleStreams(
-              (info.videoStreams || []).filter((s) => s.videoOnly === false),
-              (s) => this.audio.canPlayType(s),
-              settings.quality,
-              true,
-            ),
-          ].slice(0, 4);
-          if (!streams.length) {
-            const reason = info.audioStreams.length
-              ? "端末で再生できる音声形式がありません"
-              : "API応答に音声ストリームが含まれていません";
-            errors.push(`${new URL(h.url).hostname}: ${reason}`);
-            piped.failure(h.url, reason);
-            continue;
-          }
-          for (const stream of streams) {
-            if (token !== this.epoch) return;
-            signal.throwIfAborted();
-            try {
-              this.set({
-                engine: "piped",
-                instance: h.url,
-                message: "Piped音声に接続しています",
-              });
-              await this.startAudio(stream.url, position, signal);
-              if (token !== this.epoch) return;
-              this.set({ status: "playing", message: "" });
-              this.armWatchdog(false);
-              return;
-            } catch (e) {
-              if (token !== this.epoch) return;
-              if (e instanceof DOMException && e.name === "NotAllowedError") {
-                this.set({
-                  status: "blocked",
-                  message: "再生ボタンを押すとPiped音声を再開します",
-                });
-                return;
-              }
-              this.audio.pause();
-              errors.push(
-                `${new URL(h.url).hostname}: ${e instanceof Error ? e.message : String(e)}`,
-              );
-            }
-          }
-          piped.failure(h.url, "音声ストリームを実再生できませんでした");
+          this.resolver.invalidate(track.id, prepared.stream.url);
+          piped.audioResult(prepared.instance, "failure", error);
+          reliability.record({
+            trackId: track.id,
+            instance: prepared.instance,
+            stage: "play",
+            outcome: "failure",
+            kind: error.kind,
+            detail: error.message,
+          });
+          if (round === 1) throw error;
         }
       }
-      throw Error(
-        "現在のPiped接続先から、この曲の再生可能な音声を取得できません。接続先を再評価して再試行してください。",
+      throw new PlaybackError(
+        "internal",
+        "再生状態を確定できませんでした",
+        "play",
       );
     } catch (e) {
-      if (token !== this.epoch) return;
-      this.wantsPlay = false;
-      this.audio.pause();
-      this.onFailure(track.id);
-      const timedOut = signal.aborted && !this.abort.signal.aborted;
-      this.set({
-        status: "error",
-        message: timedOut
-          ? "Piped音声の取得が25秒でタイムアウトしました。接続先を再評価して再試行してください。"
-          : `${e instanceof Error ? e.message : String(e)}${errors.length ? " 最終結果：" + errors.slice(-2).join(" / ") : ""}`,
-      });
+      if (token !== this.epoch) return { status: "cancelled" };
+      const error = classify(e, "play", this.state.instance);
+      return this.failed(track, error);
     }
   }
-  private startAudio(url: string, position: number, signal: AbortSignal) {
+  private startAudio(
+    prepared: PreparedAudio,
+    position: number,
+    signal: AbortSignal,
+  ) {
     return new Promise<void>((resolve, reject) => {
       let settled = false;
       const done = (error?: unknown) => {
@@ -310,7 +352,7 @@ export class MusicPlayer {
         settled = true;
         clearTimeout(timer);
         this.audio.removeEventListener("loadedmetadata", metadata);
-        this.audio.removeEventListener("error", errorEvent);
+        this.audio.removeEventListener("error", failure);
         signal.removeEventListener("abort", cancel);
         error ? reject(error) : resolve();
       };
@@ -320,50 +362,83 @@ export class MusicPlayer {
           if (position > 0)
             this.audio.currentTime = Math.min(
               position,
-              this.audio.duration - 0.2,
+              Math.max(0, this.audio.duration - 0.2),
             );
         }
       };
-      const errorEvent = () => done(Error("音声URLが無効か、形式が未対応です"));
-      const cancel = () => done(new DOMException("Cancelled", "AbortError"));
+      const failure = () =>
+        done(
+          new PlaybackError(
+            this.audio.error?.code === 3
+              ? "unsupported_format"
+              : "network_or_cors",
+            `音声再生に失敗しました（MediaError ${this.audio.error?.code || 0}）`,
+            "play",
+            prepared.instance,
+          ),
+        );
+      const cancel = () => done(signal.reason);
       const timer = setTimeout(
-        () => done(Error("音声の開始がタイムアウトしました")),
-        5000,
+        () =>
+          done(
+            new PlaybackError(
+              "timeout",
+              "実音声の開始がタイムアウトしました",
+              "play",
+              prepared.instance,
+            ),
+          ),
+        6000,
       );
       this.audio.addEventListener("loadedmetadata", metadata);
-      this.audio.addEventListener("error", errorEvent);
+      this.audio.addEventListener("error", failure);
       signal.addEventListener("abort", cancel, { once: true });
-      this.audio.src = url;
+      if (signal.aborted) {
+        cancel();
+        return;
+      }
+      this.expectedSrc = prepared.stream.url;
       this.lastProgress = position;
+      this.lastTick = 0;
       this.audioConfirmed = false;
       this.stallAt = 0;
+      this.started = false;
+      this.audio.src = prepared.stream.url;
       void this.audio.play().then(() => done(), done);
     });
   }
-  async play() {
-    if (!this.current || !this.settings) return;
-    this.wantsPlay = true;
+  async play(): Promise<LoadResult> {
+    if (!this.current || !this.settings) return { status: "cancelled" };
     if (
-      this.state.status === "error" ||
-      this.state.status === "idle" ||
-      this.state.status === "ended" ||
+      ["error", "idle", "ended"].includes(this.state.status) ||
       !this.audio.src
-    ) {
-      await this.load(
+    )
+      return this.load(
         this.current,
         this.settings,
         this.state.status === "ended" ? 0 : this.state.position,
       );
-      return;
-    }
+    this.wantsPlay = true;
+    const token = this.epoch;
     try {
       await this.audio.play();
-      this.armWatchdog();
-    } catch {
-      this.set({ status: "blocked", message: "再生ボタンを押してください" });
+      if (token !== this.epoch) return { status: "cancelled" };
+      this.set({ status: "playing", message: "" });
+      return { status: "playing" };
+    } catch (e) {
+      if (token !== this.epoch) return { status: "cancelled" };
+      const error = classify(e, "play", this.state.instance);
+      if (error.kind === "autoplay_blocked") {
+        this.set({ status: "blocked", message: "再生ボタンを押してください" });
+        return { status: "blocked" };
+      }
+      const result = this.failed(this.current, error);
+      this.onTerminalFailure(this.current.id);
+      return result;
     }
   }
   pause() {
+    this.onIntent("pause");
     if (this.state.status === "loading") {
       this.abort?.abort();
       this.epoch++;
@@ -374,41 +449,46 @@ export class MusicPlayer {
     this.set({ status: "paused" });
   }
   seek(position: number) {
-    const p = Math.max(0, Math.min(position, this.state.duration));
     try {
+      const p = Math.max(0, Math.min(position, this.state.duration));
       this.audio.currentTime = p;
-      this.stallAt = 0;
       this.lastProgress = p;
+      this.lastTick = 0;
+      this.stallAt = 0;
       this.set({ position: p });
-    } catch {
-      this.set({
-        message:
-          "シークできませんでした。Piped音声を再取得して再試行してください。",
+    } catch (e) {
+      const error = classify(e, "play", this.state.instance);
+      reliability.record({
+        trackId: this.state.trackId,
+        instance: this.state.instance,
+        stage: "play",
+        outcome: "failure",
+        kind: error.kind,
+        detail: "シークに失敗しました",
       });
+      this.set({ message: "シークできませんでした。再試行してください。" });
     }
   }
   volume(value: number) {
     this.audio.volume = Math.max(0, Math.min(1, value));
   }
-  async prefetch(id: string, _settings: Settings) {
+  async prefetch(
+    id: string,
+    settings: Settings,
+    signal?: AbortSignal,
+  ): Promise<PreparedAudio | undefined> {
     if (
       (navigator as Navigator & { connection?: { saveData: boolean } })
         .connection?.saveData
     )
       return;
     try {
-      const h = piped.ranked()[0];
-      if (!h) return;
-      const info = await piped.at<StreamInfo>(
-        h.url,
-        `/streams/${id}`,
-        undefined,
-        3000,
-      );
-      if (!info.audioStreams?.length) return;
-      this.prefetchCache.clear();
-      this.prefetchCache.set(id, { at: Date.now(), info, instance: h.url });
-    } catch {}
+      return await this.resolver.prepare(id, settings, signal);
+    } catch (e) {
+      const error = classify(e);
+      if (!signal?.aborted) reliability.block(id, error);
+      return;
+    }
   }
 }
 export const player = new MusicPlayer();

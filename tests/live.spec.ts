@@ -1,142 +1,239 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
-test("public Piped playback — no API or media mocks", async ({
+import tracks from "./fixtures/piped-tracks.json";
+import { emptyData, newPlaylist } from "../src/lib/model";
+test("ten real YouTube posts: Piped media, failure skips and radio (no mocks)", async ({
   page,
-}, testInfo) => {
+}, info) => {
   test.skip(
-    !process.env.LIVE_TESTS || testInfo.project.name !== "desktop",
-    "Explicit live-network test",
+    !process.env.LIVE_TESTS || info.project.name === "android-phone",
+    "Explicit PC/tablet live service verification",
   );
-  test.setTimeout(180000);
+  test.setTimeout(720000);
+  const results: Array<Record<string, unknown>> = [];
   const report: Record<string, unknown> = {
     at: new Date().toISOString(),
-    url: process.env.E2E_BASE_URL,
-    search: "unverified",
-    pipedPlayback: "unverified",
-    seek: "unverified",
-    pauseResume: "unverified",
-    automaticNext: "unverified",
-    radio: "unverified",
+    project: info.project.name,
+    url: process.env.E2E_BASE_URL || "CI branch preview",
+    sampleCount: tracks.length,
+    coverCount: tracks.filter((t) => t.cover).length,
+    tracks: results,
+    automaticFailureSkip: "unverified",
+    endedAdvance: "unverified",
+    continuousThreeDistinct: "unverified",
+    radioContinuation: "unverified",
     errors: [],
   };
   const errors = report.errors as string[];
-  async function attempt(name: string, run: () => Promise<void>) {
-    try {
-      await run();
-      report[name] = "passed";
-    } catch (e) {
-      report[name] = "failed";
-      errors.push(`${name}: ${String(e).slice(0, 500)}`);
-    }
+  const diagnostics = async () => {
+    if (!page.url().endsWith("#settings")) await page.goto("./#settings");
+    return JSON.parse(
+      (await page.getByTestId("playback-diagnostics").textContent()) || "{}",
+    );
+  };
+  async function progresses() {
+    await expect(page.locator(".mini-track")).toContainText("再生中", {
+      timeout: 32000,
+    });
+    const slider = page.getByLabel("再生位置", { exact: true });
+    const start = Number(await slider.inputValue());
+    await expect
+      .poll(async () => Number(await slider.inputValue()), { timeout: 8000 })
+      .toBeGreaterThan(start + 1);
+  }
+  async function restore(queue: string[]) {
+    await page.goto("./#settings");
+    const d = emptyData();
+    for (const t of tracks) d.tracks[t.id] = { ...t };
+    d.queue = queue;
+    d.current = 0;
+    const p = newPlaylist("実サービス検証", queue);
+    d.playlists = [p];
+    await page.locator("input[type=file]").setInputFiles({
+      name: "live-test.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(d)),
+    });
+    await page
+      .getByRole("button", { name: "確認して復元", exact: true })
+      .click();
+    return p.id;
   }
   try {
-    await page.goto("./#search");
-    await attempt("search", async () => {
-      await page.getByLabel("楽曲を検索").fill("歌ってみた");
-      await page.getByRole("button", { name: "検索", exact: true }).click();
-      await expect(page.locator(".trackrow").first()).toBeVisible({
-        timeout: 30000,
-      });
-    });
-    // Fixed IDs from Piped responses; no substitutes or mock media in this test.
-    await page.goto("./#import");
+    expect(tracks.length).toBeGreaterThanOrEqual(10);
+    expect(tracks.filter((t) => t.cover).length).toBeGreaterThanOrEqual(5);
+    await page.goto("./#settings");
     await page
-      .getByLabel("曲一覧", { exact: true })
-      .fill("https://youtu.be/dQw4w9WgXcQ\nhttps://youtu.be/djV11Xbc914");
-    await page.getByRole("button", { name: "検索・照合する" }).click();
-    await expect(page.getByText(/確定 2/)).toBeVisible({ timeout: 55000 });
-    await page.getByRole("button", { name: "確定した曲を登録" }).click();
-    await page.goto("./#library");
-    await page.locator(".playlist-card").first().click();
-    await page
-      .locator("main")
-      .getByRole("button", { name: "再生", exact: true })
+      .getByText("選択した接続先の音声再生を確認", { exact: true })
       .click();
-    await attempt("pipedPlayback", async () => {
-      await expect(page.locator(".engine-badge")).toHaveText("Piped", {
-        timeout: 30000,
-      });
-      await expect(page.locator(".mini-track")).toContainText("再生中", {
-        timeout: 10000,
-      });
-      const start = Number(
-        await page.getByLabel("再生位置", { exact: true }).inputValue(),
+    for (const t of tracks) {
+      const started = Date.now();
+      const row: Record<string, unknown> = {
+        id: t.id,
+        title: t.title,
+        cover: t.cover,
+        playback: "failed",
+        prepared: false,
+      };
+      results.push(row);
+      await page.getByLabel("検証用動画ID").fill(t.id);
+      await page
+        .getByRole("button", { name: "音声を検証", exact: true })
+        .click();
+      await expect(
+        page.getByRole("button", { name: "音声を検証", exact: true }),
+      ).toBeEnabled({ timeout: 36000 });
+      try {
+        if (
+          (await page.locator(".mini-track").innerText()).includes("再生中")
+        ) {
+          await progresses();
+          row.playback = "passed";
+        }
+      } catch (e) {
+        row.error = String(e).slice(0, 300);
+      }
+      const diag = await diagnostics();
+      const events = diag.events.filter(
+        (e: { trackId: string; at: number }) =>
+          e.trackId === t.id && e.at >= started,
       );
-      await expect
-        .poll(
-          async () =>
-            Number(
-              await page.getByLabel("再生位置", { exact: true }).inputValue(),
-            ),
-          { timeout: 8000 },
-        )
-        .toBeGreaterThan(start + 1);
-    });
-    if (report.pipedPlayback === "passed") {
-      await attempt("seek", async () => {
-        const slider = page.getByLabel("再生位置", { exact: true });
-        await slider.press("Home");
-        await slider.press("PageUp");
-        await slider.press("PageUp");
-        await expect
-          .poll(async () => Number(await slider.inputValue()), {
-            timeout: 6000,
-          })
-          .toBeGreaterThanOrEqual(29);
-      });
-      await attempt("pauseResume", async () => {
-        await page.locator(".play-toggle").click();
-        await expect(page.locator(".mini-track")).toContainText("一時停止");
-        await page.locator(".play-toggle").click();
-        await expect(page.locator(".mini-track")).toContainText("再生中");
-      });
-      await attempt("automaticNext", async () => {
-        const slider = page.getByLabel("再生位置", { exact: true });
-        const duration = Number(await slider.getAttribute("max"));
-        expect(duration).toBeGreaterThan(2);
-        await slider.press("End");
-        await expect(page.locator(".mini-track")).not.toContainText(
-          "Rick Astley",
-          { timeout: 10000 },
-        );
-        await expect(page.locator(".mini-track")).toContainText("再生中", {
-          timeout: 30000,
-        });
-      });
-    } else {
-      report.seek = "blocked: no actual audio";
-      report.pauseResume = "blocked: no actual audio";
-      report.automaticNext = "blocked: no actual audio";
+      row.prepared = events.some(
+        (e: { stage: string; outcome: string }) =>
+          e.stage === "probe" && e.outcome === "success",
+      );
+      row.diagnostics = events;
+      row.elapsedMs = Date.now() - started;
+      console.log(
+        "LIVE_TRACK",
+        JSON.stringify({ project: info.project.name, ...row }),
+      );
     }
-    await attempt("radio", async () => {
+    const good = results
+        .filter((r) => r.playback === "passed")
+        .map((r) => String(r.id)),
+      bad = results
+        .filter((r) => r.playback !== "passed")
+        .map((r) => String(r.id));
+    report.actualPlayableCount = good.length;
+    report.acquisitionCount = results.filter((r) => r.prepared).length;
+    if (good.length) {
+      await page
+        .getByText("失敗した段階と一時除外の診断", { exact: true })
+        .click();
+      await page
+        .getByRole("button", { name: "一時除外を解除", exact: true })
+        .click();
+      // A real failure is placed ahead of a known playable post, not just a mocked ended event.
+      const queue = [...bad.slice(0, 2), good[0]];
+      const p = await restore(queue);
+      await page.goto("./#playlist/" + p);
+      await page
+        .locator("main")
+        .getByRole("button", { name: "再生", exact: true })
+        .click();
+      await progresses();
+      report.automaticFailureSkip = bad.length
+        ? "passed"
+        : "not applicable: no failing samples";
+      let diag = await diagnostics();
+      report.skipEvidence = diag.events.filter(
+        (e: { stage: string; outcome: string }) =>
+          e.stage === "queue" && e.outcome === "skip",
+      );
+      // Test a genuine ended event and return to the surviving source through a refused post.
+      if (bad.length) {
+        await restore([good[0], bad[0], good[0]]);
+        await page.locator(".play-toggle").click();
+        await progresses();
+        const before = JSON.parse(
+          (await page.getByTestId("playback-diagnostics").textContent()) ||
+            "{}",
+        ).events.filter(
+          (e: any) =>
+            e.stage === "queue" && e.outcome === "skip" && e.trackId === bad[0],
+        ).length;
+        await page.getByLabel("再生位置", { exact: true }).press("End");
+        await expect
+          .poll(
+            async () => {
+              const d = await page
+                .getByTestId("playback-diagnostics")
+                .textContent();
+              return JSON.parse(d || "{}").events.filter(
+                (e: { stage: string; outcome: string; trackId: string }) =>
+                  e.stage === "queue" &&
+                  e.outcome === "skip" &&
+                  e.trackId === bad[0],
+              ).length;
+            },
+            { timeout: 36000 },
+          )
+          .toBeGreaterThan(before);
+        await progresses();
+        report.endedAdvance =
+          "passed (returns to same surviving source; not three distinct songs)";
+      }
+      if (good.length >= 3) {
+        const p = await restore(good.slice(0, 3));
+        await page.goto("./#playlist/" + p);
+        await page
+          .locator("main")
+          .getByRole("button", { name: "再生", exact: true })
+          .click();
+        for (let i = 0; i < 3; i++) {
+          await progresses();
+          if (i < 2)
+            await page.getByLabel("再生位置", { exact: true }).press("End");
+        }
+        report.continuousThreeDistinct = "passed";
+      } else
+        report.continuousThreeDistinct = `unmet: only ${good.length} distinct post(s) playable`;
       await page.goto("./#radio");
       await page
         .getByRole("button", { name: "ラジオを開始", exact: true })
         .click();
+      await progresses();
       await page.goto("./#queue");
-      await expect
-        .poll(() => page.locator(".trackrow").count(), { timeout: 35000 })
-        .toBeGreaterThan(1);
-    });
+      try {
+        await expect
+          .poll(() => page.locator(".trackrow").count(), { timeout: 100000 })
+          .toBeGreaterThan(1);
+        await page.getByLabel("再生位置", { exact: true }).press("End");
+        await progresses();
+        report.radioContinuation = "passed";
+      } catch (e) {
+        report.radioContinuation = "unmet: no next playable recommendation";
+        errors.push(String(e).slice(0, 250));
+      }
+    } else {
+      report.automaticFailureSkip = "unverified: no playable live sample";
+      report.continuousThreeDistinct = "unmet: 0 playable samples";
+    }
+    report.diagnostics = await diagnostics();
   } catch (e) {
-    errors.push(`setup: ${String(e)}`);
+    errors.push(String(e));
   } finally {
     await mkdir("test-results", { recursive: true });
+    const name = "piped-live-" + info.project.name;
     await writeFile(
-      "test-results/live-verification.json",
+      `test-results/${name}.json`,
       JSON.stringify(report, null, 2),
     );
     console.log("LIVE_VERIFICATION", JSON.stringify(report));
-    await page
-      .screenshot({ path: "test-results/live-public.png", fullPage: true })
-      .catch(() => {});
-    await testInfo.attach("live-results", {
+    await info.attach(name, {
       body: JSON.stringify(report, null, 2),
       contentType: "application/json",
     });
+    await page
+      .screenshot({ path: `test-results/${name}.png`, fullPage: true })
+      .catch(() => {});
   }
+  // A green live qualification requires the full requested three-source result, not one cached hit.
   expect(
-    report.pipedPlayback,
-    "Audio time must advance through Piped; API JSON success alone does not count",
-  ).toBe("passed");
+    report.actualPlayableCount,
+    "three distinct real YouTube posts must play",
+  ).toBeGreaterThanOrEqual(3);
+  expect(report.continuousThreeDistinct).toBe("passed");
+  expect(report.radioContinuation).toBe("passed");
 });

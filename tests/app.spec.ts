@@ -236,3 +236,75 @@ test("decoded test audio: pause, seek, ended auto-next, route changes and radio 
   await goto(page, "queue");
   await expect.poll(() => page.locator(".trackrow").count()).toBeGreaterThan(1);
 });
+
+test("a refused middle song is skipped automatically without stopping the playlist", async ({
+  page,
+}) => {
+  await mocks(page);
+  const third = "jfKfPfyJRdk";
+  await page.route("https://**/streams/**", (r) =>
+    r.request().url().includes(id2)
+      ? r.fulfill({
+          status: 500,
+          json: { error: "SignInConfirmNotBotException LOGIN_REQUIRED" },
+        })
+      : r.fulfill({
+          json: {
+            title: r.request().url().includes(id1)
+              ? "First playable"
+              : "Last playable",
+            uploader: "Singer",
+            duration: 10,
+            thumbnailUrl: "",
+            relatedStreams: [],
+            audioStreams: [
+              {
+                url: "https://audio.musicpleasure.test/tone.wav",
+                mimeType: "audio/wav",
+                bitrate: 128000,
+              },
+            ],
+          },
+        }),
+  );
+  await page.route("https://audio.musicpleasure.test/**", (r) =>
+    r.fulfill({
+      contentType: "audio/wav",
+      body: testTone(),
+      headers: { "access-control-allow-origin": "*" },
+    }),
+  );
+  await page.goto("./#import");
+  await page
+    .getByLabel("曲一覧", { exact: true })
+    .fill(
+      `https://youtu.be/${id1}\nhttps://youtu.be/${id2}\nhttps://youtu.be/${third}`,
+    );
+  await page.getByRole("button", { name: "検索・照合する" }).click();
+  await expect(page.getByText(/確定 3/)).toBeVisible();
+  await page.getByRole("button", { name: "確定した曲を登録" }).click();
+  await goto(page, "library");
+  await page.locator(".playlist-card").click();
+  await page
+    .locator("main")
+    .getByRole("button", { name: "再生", exact: true })
+    .click();
+  await expect(page.locator(".mini-track")).toContainText("First playable");
+  await expect(page.locator(".mini-track")).toContainText("再生中");
+  await page.getByLabel("再生位置", { exact: true }).fill("9");
+  await expect(page.locator(".mini-track")).toContainText("Last playable", {
+    timeout: 15000,
+  });
+  await expect(page.locator(".mini-track")).toContainText("再生中");
+  await goto(page, "settings");
+  const diag = JSON.parse(
+    (await page.getByTestId("playback-diagnostics").textContent()) || "{}",
+  );
+  expect(
+    diag.events.some(
+      (e: any) =>
+        e.trackId === id2 && e.stage === "queue" && e.outcome === "skip",
+    ),
+  ).toBe(true);
+  expect(diag.excluded[id2].kind).toBe("upstream_rejected");
+});

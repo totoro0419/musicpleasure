@@ -4,6 +4,7 @@ import { store, useStore } from "../lib/store";
 import { validateBackup } from "../lib/model";
 import { piped } from "../lib/piped";
 import { player } from "../lib/player";
+import { reliability } from "../lib/reliability";
 import type { Data } from "../types";
 export function Settings({
   onInstall,
@@ -291,7 +292,8 @@ export function Settings({
               <div>
                 <b>{new URL(h.url).hostname}</b>
                 <small>
-                  {h.lastError ||
+                  {h.lastAudioError ||
+                    h.lastError ||
                     (!h.lastChecked
                       ? "未検証"
                       : `応答 ${Math.round(h.latency)}ms`)}
@@ -301,7 +303,8 @@ export function Settings({
                 API {h.success}成功 / {h.failure}失敗
               </span>
               <span className={h.audioSuccess ? "good" : "muted"}>
-                音声 {h.audioSuccess ? h.audioSuccess + "回成功" : "未確認"}
+                音声 {h.audioSuccess ? h.audioSuccess + "回成功" : "未確認"} /{" "}
+                {h.audioFailure || 0}失敗 · 先行確認{h.audioPrepared || 0}回
               </span>
               <span>
                 {h.cooldown > Date.now()
@@ -313,6 +316,38 @@ export function Settings({
             </div>
           ))}
         </div>
+        <details>
+          <summary>失敗した段階と一時除外の診断</summary>
+          <p className="muted">
+            API成功・音源の先行確認・実再生成功は別々に記録します。ネットワークとCORSを区別できない場合も明記します。一時除外してもプレイリストの曲は削除しません。
+          </p>
+          <button
+            onClick={() => {
+              reliability.clear();
+              store.notify(
+                "一時除外を解除しました。次の再生時に再確認します。",
+              );
+            }}
+          >
+            一時除外を解除
+          </button>
+          <pre
+            data-testid="playback-diagnostics"
+            style={{
+              maxHeight: 320,
+              overflow: "auto",
+              fontSize: 10,
+              whiteSpace: "pre-wrap",
+              overflowWrap: "anywhere",
+            }}
+          >
+            {JSON.stringify(
+              { events: reliability.events, excluded: reliability.excluded },
+              null,
+              2,
+            )}
+          </pre>
+        </details>
         <details>
           <summary>任意の接続先を追加</summary>
           <div className="actions">
@@ -350,6 +385,7 @@ export function Settings({
             <button
               disabled={audioChecking || !/^[\w-]{11}$/.test(audioCheckId)}
               onClick={async () => {
+                player.stop();
                 setAudioChecking(true);
                 const id = audioCheckId;
                 const track = {
