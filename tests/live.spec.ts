@@ -75,7 +75,9 @@ test("public Piped playback — no API or media mocks", async ({
     if (report.pipedPlayback === "passed") {
       await attempt("seek", async () => {
         const slider = page.getByLabel("再生位置", { exact: true });
-        await slider.fill("30");
+        await slider.press("Home");
+        await slider.press("PageUp");
+        await slider.press("PageUp");
         await expect
           .poll(async () => Number(await slider.inputValue()), {
             timeout: 6000,
@@ -92,7 +94,7 @@ test("public Piped playback — no API or media mocks", async ({
         const slider = page.getByLabel("再生位置", { exact: true });
         const duration = Number(await slider.getAttribute("max"));
         expect(duration).toBeGreaterThan(2);
-        await slider.fill(String(Math.floor(duration) - 1));
+        await slider.press("End");
         await expect(page.locator(".mini-track")).not.toContainText(
           "Rick Astley",
           { timeout: 10000 },

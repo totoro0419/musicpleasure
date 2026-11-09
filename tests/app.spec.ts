@@ -73,7 +73,7 @@ test("library / URL import / persistence / undo / command preview", async ({
   await page.getByRole("button", { name: "確定した曲を登録" }).click();
   await goto(page, "library");
   await expect(
-    page.getByText("取り込んだ曲", { exact: true }).last(),
+    page.locator(".playlist-card").getByText("取り込んだ曲", { exact: true }),
   ).toBeVisible();
   await page.locator(".playlist-card").click();
   await expect(page.locator(".trackrow")).toHaveCount(2);
@@ -147,7 +147,7 @@ test("API failure is an error, never a false search success", async ({
       : r.continue(),
   );
   await page.goto("./#search");
-  await page.getByLabel("楽曲を検索").fill("unavailable");
+  await page.getByLabel("楽曲を検索").fill("unavailable music query");
   await page.getByRole("button", { name: "検索", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Pipedに接続できません");
   await expect(page.locator(".trackrow")).toHaveCount(0);
