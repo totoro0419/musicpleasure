@@ -73,6 +73,7 @@ import { kindLabels, normalized, uid } from "./types";
 import type { Track, Playlist, DownloadJob } from "./types";
 import ImportPanel from "./ImportPanel";
 import { localSearch } from "./localSearch";
+import { useInstallState, requestInstall } from "./install";
 
 type View =
   | "home"
@@ -205,6 +206,25 @@ function Modal({
 export default function App() {
   const s = useStore(),
     playback = usePlayback();
+  const install = useInstallState();
+  async function installApp() {
+    if (!install.available) {
+      setInstallHelp(true);
+      return;
+    }
+    try {
+      const outcome = await requestInstall();
+      if (outcome === "unavailable") setInstallHelp(true);
+      if (outcome === "dismissed")
+        notify(
+          "インストールをキャンセルしました。後から再度お試しいただけます",
+        );
+      if (outcome === "accepted")
+        notify("インストールを受け付けました。完了は端末側で確認してください");
+    } catch {
+      setInstallHelp(true);
+    }
+  }
   const [view, setView] = useState<View>(
       () => (location.hash.slice(1) || "home") as View,
     ),
@@ -216,6 +236,7 @@ export default function App() {
     [paging, setPaging] = useState(false),
     [notice, setNotice] = useState(""),
     [settings, setSettings] = useState(false),
+    [installHelp, setInstallHelp] = useState(false),
     [full, setFull] = useState(false),
     [queueOpen, setQueueOpen] = useState(false),
     [nameModal, setNameModal] = useState<{
@@ -604,6 +625,17 @@ export default function App() {
             <span />
             {health.data ? "バックエンド接続済み" : "ローカルモード"}
           </button>
+          {!install.installed && (
+            <button
+              className="install-button"
+              onClick={() => void installApp()}
+              disabled={install.busy}
+              aria-label="MusicPleasureをインストール"
+            >
+              <Download size={17} />
+              <span>{install.busy ? "確認中…" : "インストール"}</span>
+            </button>
+          )}
           <IconButton
             className="mobile-settings"
             icon={Settings2}
@@ -1373,6 +1405,42 @@ export default function App() {
         hidden
         onChange={(e) => void importFiles(e.target.files)}
       />
+      {installHelp && (
+        <Modal
+          title="MusicPleasureをインストール"
+          onClose={() => setInstallHelp(false)}
+        >
+          <div className="install-help">
+            <p>ブラウザのメニューから、アプリとして追加できます。</p>
+            <ol>
+              <li>
+                <strong>Android（Chrome / Edge）</strong>
+                <p>
+                  右上の「⋮」→「アプリをインストール」または「ホーム画面に追加」を選びます。
+                </p>
+              </li>
+              <li>
+                <strong>Windows（Chrome / Edge）</strong>
+                <p>
+                  アドレスバーのインストールアイコン、またはブラウザのメニューから「インストール」「このサイトをアプリとしてインストール」を選びます。
+                </p>
+              </li>
+              <li>
+                <strong>iPhone / iPad（Safari）</strong>
+                <p>共有ボタン→「ホーム画面に追加」を選びます。</p>
+              </li>
+            </ol>
+            <p className="muted small">
+              アプリ内ブラウザでは追加できないことがあります。その場合はChromeやEdgeでこのページを開いてください。既に追加済みの場合は、端末のアプリ一覧を確認してください。
+            </p>
+            <div className="dialog-actions">
+              <button className="primary" onClick={() => setInstallHelp(false)}>
+                わかりました
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {settings && (
         <Modal title="設定・接続" onClose={() => setSettings(false)}>
           <SettingsPanel

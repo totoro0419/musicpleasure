@@ -3183,3 +3183,65 @@ dialog.wide {
     scroll-behavior: auto !important;
   }
 }
+
+.install-button {
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 9px 12px;
+  border: 1px solid #baa8ff32;
+  background: #baa8ff15;
+  color: #d5c8ff;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.install-button:hover {
+  background: #baa8ff26;
+}
+.install-help > p {
+  font-size: 12px;
+}
+.install-help ol {
+  padding-left: 21px;
+  margin: 20px 0;
+}
+.install-help li {
+  margin-bottom: 18px;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.install-help li p {
+  margin-top: 5px;
+  color: #b7a9c2;
+  font-size: 11px;
+}
+@media (max-width: 1250px) and (min-width: 761px) {
+  .topbar .connection {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
+  .topbar {
+    gap: 8px;
+  }
+  .topbar .global-search {
+    min-width: 0;
+  }
+  .install-button {
+    min-height: 40px;
+    padding: 9px;
+    font-size: 10px;
+    gap: 5px;
+  }
+  .install-button svg {
+    width: 15px;
+  }
+}
+@media (max-width: 350px) {
+  .install-button {
+    width: 40px;
+    padding: 0;
+  }
+  .install-button span {
+    display: none;
+  }
+}

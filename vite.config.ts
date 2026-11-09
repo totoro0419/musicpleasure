@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => ({
     react(),
     VitePWA({
       registerType: "prompt",
-      includeAssets: ["icon.svg"],
+      includeAssets: ["icon.svg", "icon-192.png", "icon-512.png"],
       manifest: {
         name: "MusicPleasure",
         short_name: "MusicPleasure",
@@ -18,7 +18,12 @@ export default defineConfig(({ mode }) => ({
         theme_color: "#101014",
         background_color: "#101014",
         display: "standalone",
+        start_url: "./",
+        scope: "./",
+        id: "./",
         icons: [
+          { src: "icon-192.png", sizes: "192x192", type: "image/png" },
+          { src: "icon-512.png", sizes: "512x512", type: "image/png" },
           {
             src: "icon.svg",
             sizes: "any",
@@ -28,7 +33,7 @@ export default defineConfig(({ mode }) => ({
         ],
       },
       workbox: {
-        globPatterns: ["**/*.{js,css,html,svg,woff2}"],
+        globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
         navigateFallback: "index.html",
         maximumFileSizeToCacheInBytes: 4000000,
       },
