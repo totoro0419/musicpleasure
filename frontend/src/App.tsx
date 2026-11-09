@@ -57,7 +57,6 @@ import {
 import { db } from "./db";
 import { api, search, jobs } from "./api";
 import {
-  audio,
   usePlayback,
   playTracks,
   togglePlayback,
@@ -72,6 +71,7 @@ import {
 import { kindLabels, normalized, uid } from "./types";
 import type { Track, Playlist, DownloadJob } from "./types";
 import ImportPanel from "./ImportPanel";
+import YouTubePlayer from "./YouTubePlayer";
 import { localSearch } from "./localSearch";
 import { useInstallState, requestInstall } from "./install";
 
@@ -628,7 +628,7 @@ export default function App() {
             <span />
             {health.data
               ? health.data.capabilities?.downloads === false
-                ? "検索接続済み"
+                ? "検索・YouTube再生"
                 : "バックエンド接続済み"
               : "ローカルモード"}
           </button>
@@ -651,6 +651,7 @@ export default function App() {
           />
           <div className="avatar">M</div>
         </header>
+        {playback.engine === "youtube" && <YouTubePlayer track={current} expanded={full} onExpand={setFull}/>}
         {!online && (
           <div className="offline-banner">
             <WifiOff size={16} />
@@ -1302,7 +1303,7 @@ export default function App() {
                 playback.time || s.position,
                 playback.duration || current?.duration || 1,
               )}
-              disabled={!current || !audio.src}
+              disabled={!current || !playback.ready}
               onChange={(e) => seek(+e.target.value)}
             />
             <span>
@@ -1537,7 +1538,7 @@ export default function App() {
           </div>
         </Modal>
       )}
-      {full && (
+      {full && playback.engine !== "youtube" && (
         <Modal title="再生中" wide onClose={() => setFull(false)}>
           <div className="full-player">
             <Artwork track={current} large />
@@ -1552,7 +1553,7 @@ export default function App() {
                 max={playback.duration || 1}
                 step=".1"
                 value={playback.time}
-                disabled={!audio.src}
+                disabled={!playback.ready}
                 onChange={(e) => seek(+e.target.value)}
               />
               <span>{formatTime(playback.duration)}</span>
@@ -2156,7 +2157,7 @@ function SettingsPanel({
           <small>
             {health
               ? health.capabilities?.downloads === false
-                ? "YouTube検索を利用できます。音声取得にはフルバックエンドの接続が必要です"
+                ? "YouTube検索とストリーミング再生を利用できます。MP3の取得・保存にはフルバックエンドの接続が必要です"
                 : "YouTube検索・音声取得を利用できます"
               : "保存済みMP3・ライブラリ・コピペ解析を利用できます"}
           </small>
