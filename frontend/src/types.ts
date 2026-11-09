@@ -39,6 +39,7 @@ export interface AudioAsset {
   sourceId: string;
   blob: Blob;
   bytes: number;
+  sha256?: string;
   createdAt: number;
 }
 export interface PlaylistEntry {
@@ -95,7 +96,7 @@ export interface DownloadJob {
     | "ready"
     | "failed"
     | "cancelled";
-  progress: number;
+  progress: number | null;
   attempt: number;
   error?: string;
   bytes: number;

@@ -101,6 +101,7 @@ test("offline parser remains responsive when backend search fails", async ({
 test("bulk preview confirms chosen candidates in the pasted order", async ({
   page,
 }) => {
+  await page.route("**/api/session", route => route.fulfill({json:{token:"fixture-device",credential:"fixture-refresh",expiresAt:Date.now()+900000}}));
   await page.route("**/api/search?**", (route) => {
     const query = new URL(route.request().url()).searchParams.get("q") || "";
     const suffix = query.includes("Song A") ? "A" : "B";

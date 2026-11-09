@@ -1,280 +1,199 @@
-import "fake-indexeddb/auto";
-import {
-  beforeAll,
-  beforeEach,
-  afterEach,
-  describe,
-  it,
-  expect,
-  vi,
-} from "vitest";
-import { db } from "../db";
-import { useStore } from "../store";
-import type { Track, AudioAsset } from "../types";
+import 'fake-indexeddb/auto';
+import { readFileSync } from 'node:fs';
+import { beforeAll, beforeEach, describe, it, expect, vi } from 'vitest';
+import { db } from '../db';
+import { useStore } from '../store';
+import type { Track, DownloadJob } from '../types';
+import { storeAudio, cachedAudio } from '../cache';
+const mocks = vi.hoisted(() => ({createJob:vi.fn(), jobs:vi.fn(), fetchAudio:vi.fn()}));
+vi.mock('../api', () => mocks);
 const handlers = new Map<string, () => void>();
 class FakeAudio extends EventTarget {
-  src = "";
-  preload = "";
-  hidden = false;
-  dataset = {};
-  volume = 1;
-  paused = true;
-  currentTime = 0;
-  duration = 8;
-  playCalls = 0;
-  onloadedmetadata: (() => void) | null = null;
-  async play() {
-    this.playCalls++;
-    this.paused = false;
-    this.dispatchEvent(new Event("playing"));
-  }
-  pause() {
-    this.paused = true;
-    this.dispatchEvent(new Event("pause"));
-  }
-  removeAttribute(name: string) {
-    if (name === "src") this.src = "";
-  }
+  private value = '';
+  get src() { return this.value; }
+  set src(value:string) { this.value=value; queueMicrotask(() => { if(this.value===value) this.onloadedmetadata?.(); }); }
+  preload=''; hidden=false; dataset={}; volume=1; paused=true;
+  currentTime=0; duration=8; playCalls=0;
+  onloadedmetadata:(() => void)|null=null;
+  play=vi.fn(async () => { this.playCalls++; this.paused=false; this.dispatchEvent(new Event('playing')); });
+  pause() { this.paused=true; this.dispatchEvent(new Event('pause')); }
+  removeAttribute(name:string) { if(name==='src') this.value=''; }
   load() {}
 }
-const track: Track = {
-  id: "local:test",
-  title: "Test",
-  artist: "Artist",
-  duration: 8,
-  thumbnail: "",
-  sources: [
-    {
-      id: "local:test",
-      provider: "local",
-      url: "",
-      kind: "local",
-      official: false,
-      evidence: "test fixture",
-    },
-  ],
-};
-const asset: AudioAsset = {
-  id: "local:test",
-  sourceId: "local:test",
-  blob: new Blob(["mp3"]),
-  bytes: 3,
-  createdAt: 0,
-};
-let player: typeof import("../player");
+const mp3 = new Blob([readFileSync(new URL('../../../backend/tests/fixtures/tone.mp3', import.meta.url))], {type:'audio/mpeg'});
+const track:Track = {id:'yt:first',title:'First',artist:'Artist',duration:8,thumbnail:'',sources:[{id:'youtube:M7lc1UVf-VE',provider:'youtube',videoId:'M7lc1UVf-VE',url:'',kind:'audio',official:false,evidence:'fixture'}]};
+const second:Track = {...track,id:'yt:second',title:'Second',sources:[{...track.sources[0],id:'youtube:abcdefghijk',videoId:'abcdefghijk'}]};
+const ready = (videoId:string):DownloadJob => ({id:videoId,videoId,state:'ready',progress:100,attempt:1,bytes:mp3.size});
+let player:typeof import('../player');
+const nav = {onLine:true,connection:{saveData:true,effectiveType:'4g'},mediaSession:{playbackState:'none',setActionHandler(a:string,h:()=>void){handlers.set(a,h);}}};
+function deferred<T>() { let resolve!:(value:T)=>void; const promise=new Promise<T>(r=>resolve=r); return {promise,resolve}; }
 beforeAll(async () => {
-  vi.stubGlobal("Audio", FakeAudio);
-  vi.stubGlobal("document", { body: { append() {} } });
-  vi.stubGlobal("navigator", {
-    mediaSession: {
-      setActionHandler(action: string, handler: () => void) {
-        handlers.set(action, handler);
-      },
-    },
-  });
-  vi.stubGlobal("MediaMetadata", class {});
-  player = await import("../player");
+  vi.stubGlobal('Audio',FakeAudio);
+  vi.stubGlobal('document',{body:{append(){}}});
+  vi.stubGlobal('navigator',nav);
+  vi.stubGlobal('MediaMetadata',class {});
+  player=await import('../player');
 });
-beforeEach(() => {
+beforeEach(async () => {
   player.clearPlayback();
-  (player.audio as unknown as FakeAudio).playCalls = 0;
-  useStore.setState({
-    loaded: false,
-    tracks: {},
-    artists: {},
-    albums: {},
-    queue: [],
-    currentId: null,
-    history: [],
-    past: [],
-    future: [],
-    settings: {
-      ...useStore.getState().settings,
-      repeat: "none",
-      shuffle: false,
-    },
-  });
+  vi.clearAllMocks();
+  await db.assets.clear();
+  nav.onLine=true; nav.connection.saveData=true;
+  (player.audio as unknown as FakeAudio).playCalls=0;
+  useStore.setState({loaded:false,tracks:{},artists:{},albums:{},playlists:[],favorites:[],queue:[],currentId:null,position:0,history:[],past:[],future:[],settings:{...useStore.getState().settings,repeat:'none',shuffle:false}});
+  mocks.createJob.mockImplementation(async (id:string)=>ready(id));
+  mocks.fetchAudio.mockResolvedValue(mp3);
 });
-afterEach(() => vi.restoreAllMocks());
-describe("player interaction contracts", () => {
-  it("pause and resume while a new asset loads never replays the previous audio", async () => {
-    let resolve!: (v: AudioAsset) => void;
-    vi.spyOn(db.assets, "get").mockReturnValue(
-      new Promise((r) => {
-        resolve = r;
-      }) as ReturnType<typeof db.assets.get>,
-    );
-    useStore.getState().play([track]);
-    player.audio.src = "blob:previous";
-    const pending = player.startCurrent();
-    await player.togglePlayback();
-    expect(player.usePlayback.getState().status).toBe("paused");
-    await player.togglePlayback();
-    expect(player.usePlayback.getState().status).toBe("loading");
-    expect((player.audio as unknown as FakeAudio).playCalls).toBe(0);
-    expect(player.audio.src).toBe("");
-    resolve(asset);
-    await pending;
-    expect((player.audio as unknown as FakeAudio).playCalls).toBe(1);
-  });
-  it("media play is idempotent and media pause cancels pending autoplay intent", async () => {
-    const get = vi.spyOn(db.assets, "get").mockResolvedValue(asset);
-    useStore.getState().play([track]);
-    await player.startCurrent();
-    handlers.get("play")!();
-    expect((player.audio as unknown as FakeAudio).playCalls).toBe(1);
-    expect(player.audio.paused).toBe(false);
-    let resolve!: (v: AudioAsset) => void;
-    get.mockReturnValue(
-      new Promise((r) => {
-        resolve = r;
-      }) as ReturnType<typeof db.assets.get>,
-    );
-    const pending = player.startCurrent();
-    handlers.get("pause")!();
-    resolve(asset);
-    await pending;
-    expect(player.audio.paused).toBe(true);
-    expect((player.audio as unknown as FakeAudio).playCalls).toBe(1);
-  });
-  it("disabling shuffle leaves the queue order stable", () => {
-    useStore.getState().play([track, { ...track, id: "local:2" }]);
-    useStore.getState().settingsUpdate({ shuffle: true });
-    const before = useStore.getState().queue;
-    player.shuffleQueue();
-    expect(useStore.getState().queue).toEqual(before);
-    expect(useStore.getState().settings.shuffle).toBe(false);
-  });
-});
-
-const ytTrack: Track = {
-  ...track,
-  id: "yt:M7lc1UVf-VE",
-  title: "YouTube fixture",
-  sources: [
-    {
-      id: "youtube:M7lc1UVf-VE",
-      provider: "youtube",
-      videoId: "M7lc1UVf-VE",
-      url: "https://www.youtube.com/watch?v=M7lc1UVf-VE",
-      kind: "unknown",
-      evidence: "test fixture",
-      official: false,
-    },
-  ],
-};
-function controller() {
-  return {
-    playVideo: vi.fn(),
-    pauseVideo: vi.fn(),
-    seekTo: vi.fn(),
-    setVolume: vi.fn(),
-    getCurrentTime: () => 12,
-    getDuration: () => 100,
-    destroy: vi.fn(),
-  };
-}
-describe("Curiveo-style playback", () => {
-  it("streams an uncached YouTube track without a download job; records only real PLAYING events", async () => {
-    vi.spyOn(db.assets, "get").mockResolvedValue(undefined);
-    const fetch = vi.fn();
-    vi.stubGlobal("fetch", fetch);
-    await player.playTracks([ytTrack]);
-    const run = player.usePlayback.getState().requestId;
-    expect(player.usePlayback.getState()).toMatchObject({
-      engine: "youtube",
-      videoId: "M7lc1UVf-VE",
-      status: "loading",
-    });
-    const yt = controller();
-    player.connectYouTube(run, yt);
-    expect(yt.playVideo).toHaveBeenCalledTimes(1);
-    expect(player.usePlayback.getState().status).toBe("loading");
-    expect(useStore.getState().history).toHaveLength(0);
-    player.youtubeState(run, 1);
-    player.youtubeState(run, 1);
+describe('automatic MP3 playback', () => {
+  it('automatically downloads, persists and plays without a save command', async () => {
+    await player.playTracks([track]);
+    expect(mocks.createJob).toHaveBeenCalledExactlyOnceWith('M7lc1UVf-VE');
+    expect(player.usePlayback.getState()).toMatchObject({engine:'audio',status:'playing',ready:true});
+    expect((await db.assets.get(track.sources[0].id))?.sha256).toHaveLength(64);
     expect(useStore.getState().history).toHaveLength(1);
-    expect(fetch).not.toHaveBeenCalled();
-    player.youtubeState(run, 2);
-    expect(useStore.getState().position).toBe(12);
-    await player.togglePlayback();
-    expect(yt.playVideo).toHaveBeenCalledTimes(2);
-    player.seek(200);
-    expect(yt.seekTo).toHaveBeenCalledWith(100, true);
-    useStore.getState().settingsUpdate({ volume: 0.35 });
-    expect(yt.setVolume).toHaveBeenLastCalledWith(35);
   });
-  it("a pause during IFrame startup cancels automatic play; blocked autoplay is truthful and recoverable", async () => {
-    vi.spyOn(db.assets, "get").mockResolvedValue(undefined);
-    await player.playTracks([ytTrack]);
-    await player.togglePlayback();
-    const yt = controller(),
-      run = player.usePlayback.getState().requestId;
-    player.connectYouTube(run, yt);
-    expect(yt.playVideo).not.toHaveBeenCalled();
-    player.youtubeBlocked(run);
-    expect(player.usePlayback.getState()).toMatchObject({ status: "paused" });
-    expect(useStore.getState().history).toHaveLength(0);
-    // A click inside the official frame is reported by its PLAYING event.
-    player.youtubeState(run, 1);
-    expect(player.usePlayback.getState().status).toBe("playing");
-    expect(player.usePlayback.getState().notice).toBe("");
+  it('uses saved audio without any API call even offline and after reopening the database', async () => {
+    await storeAudio(track.sources[0].id,mp3);
+    db.close(); await db.open(); nav.onLine=false;
+    await player.playTracks([track]);
+    expect(mocks.createJob).not.toHaveBeenCalled();
+    expect(mocks.fetchAudio).not.toHaveBeenCalled();
+    expect(player.usePlayback.getState().status).toBe('playing');
   });
-  it("ignores stale events after switching tracks and after errors", async () => {
-    vi.spyOn(db.assets, "get").mockResolvedValue(undefined);
-    await player.playTracks([ytTrack, { ...ytTrack, id: "yt:second" }]);
-    const oldRun = player.usePlayback.getState().requestId;
+  it('shares one in-flight job by video ID across different source IDs', async () => {
+    const gate=deferred<DownloadJob>(); mocks.createJob.mockReturnValue(gate.promise);
+    const a=player.ensureAudio(track);
+    const b=player.ensureAudio({...track,id:'alias',sources:[{...track.sources[0],id:'old-source-id'}]});
+    expect(a).toBe(b);
+    await vi.waitFor(()=>expect(mocks.createJob).toHaveBeenCalledTimes(1));
+    gate.resolve(ready('M7lc1UVf-VE')); await Promise.all([a,b]);
+    expect(mocks.fetchAudio).toHaveBeenCalledTimes(1);
+  });
+  it('polls actual queued/downloading/converting states before saving or playing', async () => {
+    mocks.createJob.mockResolvedValue({...ready('M7lc1UVf-VE'),state:'queued',progress:null});
+    mocks.jobs.mockResolvedValueOnce([{...ready('M7lc1UVf-VE'),state:'converting',progress:null}]).mockResolvedValue([ready('M7lc1UVf-VE')]);
+    const task=player.playTracks([track]);
+    await vi.waitFor(()=>expect(player.usePlayback.getState().status).toBe('loading'));
+    expect(mocks.fetchAudio).not.toHaveBeenCalled();
+    expect((player.audio as unknown as FakeAudio).playCalls).toBe(0);
+    await task;
+    expect(mocks.jobs).toHaveBeenCalledTimes(2);
+    expect(player.usePlayback.getState().status).toBe('playing');
+  });
+  it('never autoplays a superseded request after switching tracks', async () => {
+    const gate=deferred<DownloadJob>();
+    mocks.createJob.mockImplementation((id:string)=>id==='M7lc1UVf-VE'?gate.promise:Promise.resolve(ready(id)));
+    const old=player.playTracks([track,second]);
+    await vi.waitFor(()=>expect(mocks.createJob).toHaveBeenCalledTimes(1));
     await player.next();
-    const current = useStore.getState().currentId,
-      run = player.usePlayback.getState().requestId;
-    player.youtubeState(oldRun, 0);
-    player.youtubeState(oldRun, 1);
-    player.youtubeFailure(oldRun, "old error");
-    expect(useStore.getState().currentId).toBe(current);
+    const src=player.audio.src;
+    gate.resolve(ready('M7lc1UVf-VE')); await old;
+    expect(player.audio.src).toBe(src);
+    expect(useStore.getState().history.map(h=>h.trackId)).toEqual([second.id]);
+  });
+  it('pause while downloading preserves pause intent after completion', async () => {
+    const gate=deferred<DownloadJob>(); mocks.createJob.mockReturnValue(gate.promise);
+    const task=player.playTracks([track]);
+    await vi.waitFor(()=>expect(mocks.createJob).toHaveBeenCalledTimes(1));
+    await player.togglePlayback(); gate.resolve(ready('M7lc1UVf-VE')); await task;
+    expect(player.audio.paused).toBe(true);
+    expect(player.usePlayback.getState().status).toBe('paused');
     expect(useStore.getState().history).toHaveLength(0);
-    player.youtubeFailure(run, "Embedding disabled");
-    player.youtubeState(run, 2);
-    expect(player.usePlayback.getState()).toMatchObject({
-      status: "error",
-      error: "Embedding disabled",
-    });
-    await player.togglePlayback();
-    expect(player.usePlayback.getState().status).toBe("loading");
-    expect(player.usePlayback.getState().requestId).not.toBe(run);
+    await player.togglePlayback(); expect(player.usePlayback.getState().status).toBe('playing');
+    expect(mocks.createJob).toHaveBeenCalledTimes(1);
   });
-  it("prefers a saved MP3 even for a YouTube source", async () => {
-    vi.spyOn(db.assets, "get").mockResolvedValue({
-      ...asset,
-      id: ytTrack.sources[0].id,
-    });
-    await player.playTracks([ytTrack]);
-    expect(player.usePlayback.getState().engine).toBe("audio");
-    expect(player.audio.src).toMatch(/^blob:/);
+  it('media pause cancels pending autoplay and media play is idempotent', async () => {
+    const gate=deferred<DownloadJob>(); mocks.createJob.mockReturnValue(gate.promise);
+    const task=player.playTracks([track]); handlers.get('pause')!();
+    gate.resolve(ready('M7lc1UVf-VE')); await task;
+    expect(player.audio.paused).toBe(true);
+    handlers.get('play')!(); await vi.waitFor(()=>expect(player.audio.paused).toBe(false));
+    handlers.get('play')!(); expect((player.audio as unknown as FakeAudio).playCalls).toBe(1);
   });
-  it("repeats one streaming track and advances to a local MP3 without editing the playlist", async () => {
-    vi.spyOn(db.assets, "get").mockImplementation(
-      (id) =>
-        Promise.resolve(
-          (id as unknown) === "local:test" ? asset : undefined,
-        ) as ReturnType<typeof db.assets.get>,
-    );
-    const id = useStore.getState().createPlaylist("Mixed", [ytTrack, track]);
-    const entries = useStore
-      .getState()
-      .playlists.find((p) => p.id === id)!.entries;
-    await player.playTracks([ytTrack, track]);
-    const yt = controller(),
-      run = player.usePlayback.getState().requestId;
-    player.connectYouTube(run, yt);
-    useStore.getState().settingsUpdate({ repeat: "one" });
-    await player.next(true);
-    expect(yt.seekTo).toHaveBeenCalledWith(0, true);
-    expect(yt.playVideo).toHaveBeenCalledTimes(2);
-    useStore.getState().settingsUpdate({ repeat: "none" });
-    await player.next(true);
-    expect(player.usePlayback.getState().engine).toBe("audio");
-    expect(
-      useStore.getState().playlists.find((p) => p.id === id)!.entries,
-    ).toEqual(entries);
+  it('prefetches only the next track and reuses it when advancing', async () => {
+    nav.connection.saveData=false;
+    const third={...second,id:'third',sources:[{...second.sources[0],id:'youtube:12345678901',videoId:'12345678901'}]};
+    await player.playTracks([track,second,third]);
+    await vi.waitFor(async()=>expect(await db.assets.get(second.sources[0].id)).toBeDefined());
+    expect(mocks.createJob.mock.calls.map(c=>c[0])).toEqual(['M7lc1UVf-VE','abcdefghijk']);
+    nav.connection.saveData=true;
+    await player.next();
+    expect(mocks.createJob).toHaveBeenCalledTimes(2);
   });
+  it('reports failure without any playback fallback and allows retry', async () => {
+    mocks.createJob.mockResolvedValueOnce({...ready('M7lc1UVf-VE'),state:'failed',error:'取得できません'});
+    await player.playTracks([track]);
+    expect(player.usePlayback.getState()).toMatchObject({status:'error',engine:null,error:'取得できません'});
+    expect(player.audio.src).toBe(''); expect(useStore.getState().history).toHaveLength(0);
+    await player.togglePlayback(); expect(player.usePlayback.getState().status).toBe('playing');
+  });
+  it('detects cache corruption, discards it, and re-downloads the requested track', async () => {
+    await storeAudio(track.sources[0].id,mp3);
+    await db.assets.update(track.sources[0].id,{sha256:'invalid'});
+    await player.playTracks([track]); expect(mocks.createJob).toHaveBeenCalledTimes(1);
+    expect(await cachedAudio(track)).toBeDefined();
+  });
+  it('rejects an invalid server payload without storing or claiming playback', async () => {
+    mocks.fetchAudio.mockResolvedValueOnce(new Blob(['not audio']));
+    await player.playTracks([track]);
+    expect(player.usePlayback.getState().status).toBe('error');
+    expect(await db.assets.count()).toBe(0);
+  });
+  it('does not pretend autoplay succeeded when the browser denies play()', async () => {
+    const audio=player.audio as unknown as FakeAudio;
+    audio.play.mockRejectedValueOnce(new DOMException('Autoplay denied','NotAllowedError'));
+    await player.playTracks([track]);
+    expect(player.usePlayback.getState().status).toBe('error');
+    expect(useStore.getState().history).toHaveLength(0);
+    await player.togglePlayback(); expect(player.usePlayback.getState().status).toBe('playing');
+  });
+  it('restores seek position and supports repeat, volume and playlist isolation', async () => {
+    const id=useStore.getState().createPlaylist('Saved',[track,second]);
+    const entries=structuredClone(useStore.getState().playlists[0].entries);
+    useStore.getState().play([track,second]); useStore.setState({position:3});
+    await player.startCurrent(false); expect(player.audio.currentTime).toBe(3);
+    player.seek(5); expect(useStore.getState().position).toBe(5);
+    useStore.getState().settingsUpdate({volume:.35,repeat:'one'});
+    expect(player.audio.volume).toBe(.35);
+    await player.next(true); expect(player.audio.currentTime).toBe(0);
+    useStore.getState().settingsUpdate({repeat:'none'}); await player.next();
+    expect(useStore.getState().playlists.find(p=>p.id===id)?.entries).toEqual(entries);
+  });
+  it('does not download when a playlist is merely created or edited', () => {
+    useStore.getState().createPlaylist('Playlist',[track,second]);
+    expect(mocks.createJob).not.toHaveBeenCalled();
+  });
+  it('retains shared MP3 when one playlist is deleted', async () => {
+    await storeAudio(track.sources[0].id,mp3);
+    const first=useStore.getState().createPlaylist('One',[track]);
+    useStore.getState().createPlaylist('Two',[track]); useStore.getState().deletePlaylist(first);
+    expect(await cachedAudio(track)).toBeDefined();
+  });
+});
+it('stop during preparation cancels intent and resets the position without clearing the queue',async()=>{
+  const gate=deferred<DownloadJob>();mocks.createJob.mockReturnValue(gate.promise);
+  const task=player.playTracks([track]);
+  await vi.waitFor(()=>expect(mocks.createJob).toHaveBeenCalledTimes(1));
+  player.stopPlayback();gate.resolve(ready('M7lc1UVf-VE'));await task;
+  expect(player.audio.src).toBe('');expect(player.audio.paused).toBe(true);
+  expect(useStore.getState().queue).toHaveLength(1);expect(useStore.getState().position).toBe(0);
+});
+it('limits actual downloads to two in flight even for explicit bulk requests',async()=>{
+  const one=deferred<DownloadJob>(),two=deferred<DownloadJob>();
+  mocks.createJob.mockImplementation((id:string)=>id==='M7lc1UVf-VE'?one.promise:id==='abcdefghijk'?two.promise:Promise.resolve(ready(id)));
+  const third={...second,id:'third',sources:[{...second.sources[0],id:'youtube:12345678901',videoId:'12345678901'}]};
+  const bulk=player.saveTracks([track,second,third]);
+  await vi.waitFor(()=>expect(mocks.createJob).toHaveBeenCalledTimes(2));
+  one.resolve(ready('M7lc1UVf-VE'));
+  await vi.waitFor(()=>expect(mocks.createJob).toHaveBeenCalledTimes(3));
+  two.resolve(ready('abcdefghijk'));await bulk;
+  expect(await db.assets.count()).toBe(3);
+});
+it('keeps a valid legacy asset playable when metadata migration fails',async()=>{
+  await db.assets.put({id:track.sources[0].id,sourceId:track.sources[0].id,blob:mp3,bytes:mp3.size,createdAt:0});
+  const put=vi.spyOn(db.assets,'put').mockRejectedValueOnce(new Error('storage full'));
+  const blob=await cachedAudio(track);
+  expect(blob?.size).toBe(mp3.size);
+  expect(await db.assets.get(track.sources[0].id)).toBeDefined();
+  put.mockRestore();
 });

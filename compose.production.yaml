@@ -1,0 +1,20 @@
+# docker compose -f compose.yaml -f compose.production.yaml up -d --build
+services:
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      MUSICPLEASURE_DOMAIN: ${MUSICPLEASURE_DOMAIN:?Set a domain whose DNS points to this host}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+volumes:
+  caddy-data:
+  caddy-config:

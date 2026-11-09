@@ -39,6 +39,7 @@ import {
   SkipBack,
   SkipForward,
   Sparkles,
+  Square,
   Trash2,
   Undo2,
   Upload,
@@ -55,6 +56,7 @@ import {
   putTracks,
 } from "./store";
 import { db } from "./db";
+import { sourceKey } from "./cache";
 import { api, search, jobs } from "./api";
 import {
   usePlayback,
@@ -66,12 +68,14 @@ import {
   selectQueue,
   shuffleQueue,
   ensureAudio,
+  saveTracks,
   clearPlayback,
+  stopPlayback,
 } from "./player";
 import { kindLabels, normalized, uid } from "./types";
 import type { Track, Playlist, DownloadJob } from "./types";
 import ImportPanel from "./ImportPanel";
-import YouTubePlayer from "./YouTubePlayer";
+
 import { localSearch } from "./localSearch";
 import { useInstallState, requestInstall } from "./install";
 
@@ -628,9 +632,9 @@ export default function App() {
             <span />
             {health.data
               ? health.data.capabilities?.downloads === false
-                ? "検索・YouTube再生"
+                ? "検索接続済み"
                 : "バックエンド接続済み"
-              : "ローカルモード"}
+              : health.isPending ? "接続を確認中" : "サーバー未接続"}
           </button>
           {!install.installed && (
             <button
@@ -651,7 +655,6 @@ export default function App() {
           />
           <div className="avatar">M</div>
         </header>
-        {playback.engine === "youtube" && <YouTubePlayer track={current} expanded={full} onExpand={setFull}/>}
         {!online && (
           <div className="offline-banner">
             <WifiOff size={16} />
@@ -1228,7 +1231,7 @@ export default function App() {
             <strong>{current?.title || "音楽を、はじめよう。"}</strong>
             <small>
               {playback.status === "loading"
-                ? "音源を準備中…"
+                ? `${playback.phase || "音源を準備中"}…`
                 : current?.artist || "最初の一曲を選んでください"}
             </small>
           </span>
@@ -1538,7 +1541,7 @@ export default function App() {
           </div>
         </Modal>
       )}
-      {full && playback.engine !== "youtube" && (
+      {full && (
         <Modal title="再生中" wide onClose={() => setFull(false)}>
           <div className="full-player">
             <Artwork track={current} large />
@@ -1604,6 +1607,7 @@ export default function App() {
               />
             </div>
             <div className="full-tools">
+              <IconButton icon={Square} label="停止" onClick={stopPlayback} disabled={!current} />
               <IconButton
                 icon={Heart}
                 label="お気に入り"
@@ -1636,7 +1640,7 @@ export default function App() {
             </div>
             <p className="muted small">
               {playback.status === "loading"
-                ? "MP3音源を準備しています"
+                ? playback.phase || "MP3音源を準備しています"
                 : playback.status === "error"
                   ? playback.error
                   : playback.status === "playing"
@@ -1757,7 +1761,7 @@ function TrackList({
   const render = (row: { id: string; track: Track }, i: number) => {
     const t = row.track;
     if (!t) return null;
-    const saved = t.sources.some((a) => localIds.has(a.id));
+    const saved = t.sources.some((a) => localIds.has(a.id) || localIds.has(sourceKey(a)));
     return (
       <div
         key={row.id}
@@ -1927,6 +1931,11 @@ function TrackList({
             キューへ追加
           </button>
           <button onClick={() => addTo(bulkTracks)}>プレイリストへ</button>
+          <button onClick={() => {
+            s.addTracks(bulkTracks);
+            notify(`${bulkTracks.length}曲のMP3保存を開始しました`);
+            void saveTracks(bulkTracks).then(() => notify('選択したMP3を保存しました')).catch(e => notify(e.message));
+          }}>選択した曲を一括保存</button>
           <select
             aria-label="コピー先プレイリスト"
             value={target}
@@ -2157,12 +2166,15 @@ function SettingsPanel({
           <small>
             {health
               ? health.capabilities?.downloads === false
-                ? "YouTube検索とストリーミング再生を利用できます。MP3の取得・保存にはフルバックエンドの接続が必要です"
+                ? "検索は利用できます。音源サーバーの公開設定は未完了です。保存済みMP3を再生できます"
                 : "YouTube検索・音声取得を利用できます"
               : "保存済みMP3・ライブラリ・コピペ解析を利用できます"}
           </small>
         </div>
       </div>
+      <p className="muted small">再生ボタンを押すとMP3を自動で取得・保存します。接続と端末認証は自動で行います。</p>
+      <details>
+        <summary>開発・診断用の接続設定</summary>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -2217,6 +2229,7 @@ function SettingsPanel({
           保存して接続
         </button>
       </form>
+      </details>
       {healthError && <p className="muted small">接続確認: {healthError}</p>}
       {health && (
         <div className="capabilities">
@@ -2333,7 +2346,7 @@ function Downloads({ notify }: { notify: Notify }) {
     void navigator.storage?.estimate?.().then(setEstimate);
   }, [playback.cacheRevision]);
   const titles = (id: string) =>
-    Object.values(s.tracks).find((t) => t.sources.some((a) => a.id === id))
+    Object.values(s.tracks).find((t) => t.sources.some((a) => a.id === id || sourceKey(a) === id))
       ?.title || id;
   return (
     <>
@@ -2379,11 +2392,11 @@ function Downloads({ notify }: { notify: Notify }) {
                   cancelled: "キャンセル済み",
                 }[j.state]
               }{" "}
-              · {j.progress.toFixed(0)}% · {j.attempt}/3回
+              {j.state === "downloading" && j.progress !== null ? ` · ${j.progress.toFixed(0)}%` : ""} · {j.attempt}/3回
             </small>
             {j.error && <p className="error small">{j.error}</p>}
             {!["ready", "failed", "cancelled"].includes(j.state) && (
-              <progress max="100" value={j.progress} />
+              <progress aria-label="音源取得の進捗" max="100" value={j.state === "downloading" && j.progress !== null ? j.progress : undefined} />
             )}
           </div>
           {["failed", "cancelled"].includes(j.state) ? (
@@ -2415,11 +2428,12 @@ function Downloads({ notify }: { notify: Notify }) {
           <IconButton
             icon={Trash2}
             label="サーバー音源・ジョブを削除"
-            onClick={() =>
+            onClick={() => {
+              if (!confirm("このサーバー音源・ジョブを削除しますか？端末内MP3は保持されます")) return;
               void api(`/jobs/${j.id}`, { method: "DELETE" })
                 .then(() => list.refetch())
-                .catch((e) => notify(e.message))
-            }
+                .catch((e) => notify(e.message));
+            }}
           />
         </div>
       ))}
@@ -2427,6 +2441,16 @@ function Downloads({ notify }: { notify: Notify }) {
         <p className="muted">取得中のジョブはありません。</p>
       )}
       <h2 className="list-heading">この端末に保存したMP3</h2>
+      <button onClick={() => {
+        const referenced = new Set(Object.values(s.tracks).flatMap(t => t.sources.flatMap(source => [source.id, sourceKey(source)])));
+        const unused = assets.filter(a => !referenced.has(a.id));
+        if (!unused.length) { notify('不要な音源はありません'); return; }
+        if (!confirm(`ライブラリから参照されていない${unused.length}曲のMP3を削除しますか？`)) return;
+        void db.assets.bulkDelete(unused.map(a => a.id)).then(() => {
+          usePlayback.setState(v => ({cacheRevision:v.cacheRevision + 1}));
+          notify('不要な音源を整理しました');
+        }).catch(() => notify('音源を削除できませんでした'));
+      }}>不要音源を整理</button>
       {assets.map((a) => (
         <div className="download-row" key={a.id}>
           <Music2 size={20} />
@@ -2438,6 +2462,7 @@ function Downloads({ notify }: { notify: Notify }) {
             icon={Trash2}
             label={`${titles(a.id)}の端末内MP3を削除`}
             onClick={() => {
+              if (!confirm(`${titles(a.id)}の端末内MP3を削除しますか？再生には再取得が必要です`)) return;
               void db.assets.delete(a.id).then(() => {
                 usePlayback.setState((v) => ({
                   cacheRevision: v.cacheRevision + 1,
@@ -2445,7 +2470,7 @@ function Downloads({ notify }: { notify: Notify }) {
                 notify(
                   "端末内のMP3を削除しました。ライブラリの曲情報は保持されます",
                 );
-              });
+              }).catch(() => notify('音源を削除できませんでした'));
             }}
           />
         </div>
@@ -2454,7 +2479,7 @@ function Downloads({ notify }: { notify: Notify }) {
         <Empty
           icon={Download}
           title="好きな曲を、いつでも。"
-          text="曲のメニューからMP3を保存すると、オフラインで聴けます。"
+          text="曲を再生するとMP3を自動保存します。次回からオフラインでも聴けます。"
         />
       )}
     </>

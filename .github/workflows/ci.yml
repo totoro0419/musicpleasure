@@ -17,7 +17,9 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - run: npm run check:playback
       - run: npx playwright install --with-deps chromium
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: npm run e2e
       - uses: actions/upload-artifact@v4
         if: failure()
