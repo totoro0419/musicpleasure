@@ -20,7 +20,10 @@ async function transport(page:Page, gate?:()=>Promise<void>, fail=false){
 }
 async function search(page:Page){
   await page.goto('/#search');
-  await page.getByLabel('曲・アーティスト・YouTube URLを検索',{exact:true}).fill('MP3 fixtures');
+  const input=page.getByLabel('曲・アーティスト・YouTube URLを検索',{exact:true});
+  await input.fill('MP3 fixtures');
+  await input.press('Enter');
+  await expect(input).toHaveValue('MP3 fixtures');
   await expect(page.getByRole('button',{name:'MP3 fixture 1を再生',exact:true})).toBeVisible();
 }
 async function playing(page:Page){await expect.poll(()=>page.locator('audio').evaluate((a:HTMLAudioElement)=>!a.paused && a.currentTime>0)).toBe(true);}
