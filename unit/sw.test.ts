@@ -46,6 +46,7 @@ async function boot(names: string[], active = true) {
     },
     caches,
     URL,
+    Request,
     fetch: async () => {
       throw Error("offline");
     },
