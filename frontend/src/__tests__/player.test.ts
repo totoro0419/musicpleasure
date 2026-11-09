@@ -189,3 +189,11 @@ it('limits actual downloads to two in flight even for explicit bulk requests',as
   two.resolve(ready('abcdefghijk'));await bulk;
   expect(await db.assets.count()).toBe(3);
 });
+it('keeps a valid legacy asset playable when metadata migration fails',async()=>{
+  await db.assets.put({id:track.sources[0].id,sourceId:track.sources[0].id,blob:mp3,bytes:mp3.size,createdAt:0});
+  const put=vi.spyOn(db.assets,'put').mockRejectedValueOnce(new Error('storage full'));
+  const blob=await cachedAudio(track);
+  expect(blob?.size).toBe(mp3.size);
+  expect(await db.assets.get(track.sources[0].id)).toBeDefined();
+  put.mockRestore();
+});

@@ -1761,7 +1761,7 @@ function TrackList({
   const render = (row: { id: string; track: Track }, i: number) => {
     const t = row.track;
     if (!t) return null;
-    const saved = t.sources.some((a) => localIds.has(a.id));
+    const saved = t.sources.some((a) => localIds.has(a.id) || localIds.has(sourceKey(a)));
     return (
       <div
         key={row.id}
