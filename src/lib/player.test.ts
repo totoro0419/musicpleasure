@@ -1,0 +1,161 @@
+import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
+import { emptyData, placeholder } from "./model";
+class FakeAudio extends EventTarget {
+  preload = "";
+  volume = 1;
+  src = "";
+  duration = 100;
+  currentTime = 0;
+  paused = true;
+  canPlayType() {
+    return "probably";
+  }
+  play() {
+    if (this.src.includes("broken")) return Promise.reject(Error("403"));
+    this.paused = false;
+    this.dispatchEvent(new Event("playing"));
+    return Promise.resolve();
+  }
+  pause() {
+    this.paused = true;
+  }
+  load() {}
+  removeAttribute(name: string) {
+    if (name === "src") this.src = "";
+  }
+}
+const info = (name: string, urls = ["https://audio.test/valid"]) => ({
+  title: name,
+  uploader: "Artist",
+  uploaderUrl: "/channel/test",
+  thumbnailUrl: "",
+  duration: 100,
+  relatedStreams: [],
+  audioStreams: urls.map((url) => ({
+    url,
+    mimeType: "audio/mp4",
+    bitrate: 128000,
+  })),
+});
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.resetModules();
+  vi.stubGlobal("Audio", FakeAudio);
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("document", new EventTarget());
+  vi.stubGlobal("navigator", {});
+});
+afterEach(() => {
+  vi.clearAllTimers();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+async function setup() {
+  const { piped } = await import("./piped");
+  piped.health = [
+    {
+      url: "https://api.test",
+      success: 0,
+      failure: 0,
+      latency: 0,
+      cooldown: 0,
+      lastError: "",
+      audioSuccess: 0,
+      lastChecked: 0,
+    },
+  ];
+  vi.spyOn(piped, "record").mockImplementation(() => {});
+  const { MusicPlayer } = await import("./player");
+  return { piped, p: new MusicPlayer() };
+}
+describe("playback concurrency and recovery (simulated media)", () => {
+  it("starts only a playable stream and reports audio success", async () => {
+    const { p, piped } = await setup();
+    vi.spyOn(piped, "at").mockResolvedValue(info("First"));
+    await p.load(placeholder("M7lc1UVf-VE"), {
+      ...emptyData().settings,
+      engine: "piped",
+    });
+    expect(p.state.status).toBe("playing");
+    expect(p.audio.paused).toBe(false);
+    p.audio.currentTime = 2;
+    await vi.advanceTimersByTimeAsync(500);
+    expect(piped.health[0].audioSuccess).toBe(1);
+  });
+  it("tries another compatible format after audio URL failure", async () => {
+    const { p, piped } = await setup();
+    vi.spyOn(piped, "at").mockResolvedValue(
+      info("First", ["https://audio.test/broken", "https://audio.test/valid"]),
+    );
+    await p.load(placeholder("M7lc1UVf-VE"), {
+      ...emptyData().settings,
+      engine: "piped",
+    });
+    expect(p.state.status).toBe("playing");
+    expect(p.audio.src).toContain("valid");
+  });
+  it("never treats JSON success without audio as successful playback", async () => {
+    const { p, piped } = await setup();
+    vi.spyOn(piped, "at").mockResolvedValue(info("First", []));
+    await p.load(placeholder("M7lc1UVf-VE"), {
+      ...emptyData().settings,
+      engine: "piped",
+    });
+    expect(p.state.status).toBe("error");
+    expect(piped.health[0].audioSuccess).toBe(0);
+  });
+  it("ignores a late response after stop", async () => {
+    const { p, piped } = await setup();
+    let resolve!: (v: unknown) => void;
+    vi.spyOn(piped, "at").mockImplementation(
+      () => new Promise((r) => (resolve = r)),
+    );
+    const load = p.load(placeholder("M7lc1UVf-VE"), emptyData().settings);
+    p.stop();
+    resolve(info("Stale"));
+    await load;
+    expect(p.state.status).toBe("idle");
+    expect(p.audio.paused).toBe(true);
+    expect(p.audio.src).toBe("");
+  });
+  it("ignores the old track response during rapid next-track requests", async () => {
+    const { p, piped } = await setup();
+    let first!: (v: unknown) => void;
+    let count = 0;
+    vi.spyOn(piped, "at").mockImplementation(() =>
+      ++count === 1
+        ? new Promise((r) => (first = r))
+        : (Promise.resolve(info("New")) as never),
+    );
+    const firstLoad = p.load(placeholder("M7lc1UVf-VE"), emptyData().settings);
+    await p.load(placeholder("aqz-KE-bpKQ"), emptyData().settings);
+    first(info("Old"));
+    await firstLoad;
+    expect(p.state.trackId).toBe("aqz-KE-bpKQ");
+    expect(p.state.status).toBe("playing");
+  });
+  it("consumes duplicate ended events only once", async () => {
+    const { p, piped } = await setup();
+    vi.spyOn(piped, "at").mockResolvedValue(info("First"));
+    const ended = vi.fn();
+    p.onEnded = ended;
+    await p.load(placeholder("M7lc1UVf-VE"), emptyData().settings);
+    p.audio.dispatchEvent(new Event("ended"));
+    p.audio.dispatchEvent(new Event("ended"));
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
+  it("pause, resume and seek stay within the current engine", async () => {
+    const { p, piped } = await setup();
+    vi.spyOn(piped, "at").mockResolvedValue(info("First"));
+    await p.load(placeholder("M7lc1UVf-VE"), emptyData().settings);
+    p.seek(35);
+    expect(p.audio.currentTime).toBe(35);
+    p.pause();
+    expect(p.audio.paused).toBe(true);
+    expect(p.state.status).toBe("paused");
+    await p.play();
+    expect(p.audio.paused).toBe(false);
+    expect(p.state.status).toBe("playing");
+  });
+});
