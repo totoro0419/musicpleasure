@@ -180,7 +180,11 @@ export const store = {
     else void this.playCurrent(data.position);
   },
   next(ended = false) {
-    if (!ended && data.queue[data.current]) {
+    if (
+      !ended &&
+      data.queue[data.current] &&
+      ["playing", "paused"].includes(playback.status)
+    ) {
       const id = data.queue[data.current];
       this.update((d) => {
         const stat = d.listening[id] || {
@@ -400,12 +404,17 @@ player.onIntent = () => {
   prefetchAbort?.abort();
 };
 player.onTerminalFailure = (id) => {
-  if (!traversal.running && data.queue[data.current] === id) {
-    const index = data.current + 1;
-    if (index < data.queue.length) {
-      store.update((d) => ({ ...d, current: index, position: 0 }));
-      void store.playCurrent(0, false);
-    }
+  if (
+    !traversal.running &&
+    data.queue[data.current] === id &&
+    playback.status === "error"
+  ) {
+    if (
+      data.current + 1 < data.queue.length ||
+      data.repeat === "all" ||
+      data.radio
+    )
+      store.next();
   }
 };
 reliability.onChange = () => {
