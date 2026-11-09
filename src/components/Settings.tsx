@@ -129,6 +129,7 @@ export function Settings({
                 className="primary"
                 onClick={() => {
                   player.stop();
+                  store.enableSaving();
                   store.update(
                     (d) => ({
                       ...d,

@@ -1,15 +1,31 @@
 import { openDB } from "idb";
 import { emptyData, validateBackup } from "./model";
 import type { Data } from "../types";
+let database: ReturnType<typeof openDB> | undefined;
 const db = () =>
-  openDB("musicpleasure-v2", 2, {
+  (database ??= openDB("musicpleasure-v2", 2, {
     upgrade(db) {
       if (!db.objectStoreNames.contains("state")) db.createObjectStore("state");
     },
-  });
+  }));
 export async function readData() {
   const d = await db();
-  const value = await d.get("state", "app");
+  let value = await d.get("state", "app");
+  if (typeof sessionStorage !== "undefined") {
+    const recovery = sessionStorage.getItem("musicpleasure-recovery");
+    if (recovery) {
+      try {
+        const raw = JSON.parse(recovery);
+        const restored = validateBackup(raw);
+        restored.importJob = Array.isArray(raw.importJob) ? raw.importJob : [];
+        await d.put("state", restored, "app");
+        value = restored;
+        sessionStorage.removeItem("musicpleasure-recovery");
+      } catch {
+        /* Preserve the durable original when recovery data is invalid. */
+      }
+    }
+  }
   if (!value) return emptyData();
   const clean = validateBackup(value);
   clean.importJob = Array.isArray(value.importJob) ? value.importJob : [];

@@ -233,7 +233,47 @@ function NowPlaying({ onAdd }: { onAdd: (ids: string[]) => void }) {
                   <RadioIcon size={18} />
                   この曲からラジオ
                 </button>
+                <button
+                  aria-pressed={data.shuffle}
+                  onClick={() => store.shuffle()}
+                >
+                  <Shuffle size={18} />
+                  シャッフル {data.shuffle ? "ON" : "OFF"}
+                </button>
+                <button
+                  onClick={() =>
+                    store.update((d) => ({
+                      ...d,
+                      repeat:
+                        d.repeat === "off"
+                          ? "all"
+                          : d.repeat === "all"
+                            ? "one"
+                            : "off",
+                    }))
+                  }
+                >
+                  <Repeat size={18} />
+                  リピート{" "}
+                  {data.repeat === "off"
+                    ? "なし"
+                    : data.repeat === "all"
+                      ? "全曲"
+                      : "1曲"}
+                </button>
               </div>
+              <label className="full-volume">
+                音量
+                <input
+                  aria-label="再生画面の音量"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step=".01"
+                  defaultValue={player.audio.volume}
+                  onChange={(e) => player.volume(Number(e.target.value))}
+                />
+              </label>
             </div>
           </section>
           <TrackList

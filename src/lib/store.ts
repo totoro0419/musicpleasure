@@ -15,11 +15,11 @@ let data = emptyData();
 let playback = player.state;
 let notice = "";
 let loaded = false;
+let savingBlocked = false;
 let revision = 0;
 let healthRevision = 0;
 let snapshot = { data, playback, notice, loaded, revision, healthRevision };
 const listeners = new Set<() => void>();
-let saveTimer: ReturnType<typeof setTimeout>;
 let radioAbort: AbortController | undefined;
 let radioPending = false;
 let lastPositionSave = 0;
@@ -37,15 +37,11 @@ function emit() {
   listeners.forEach((fn) => fn());
 }
 function persist() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(
-    () =>
-      void saveData(data).catch((e) => {
-        notice = `保存できません。バックアップを書き出してください：${e.message}`;
-        emit();
-      }),
-    250,
-  );
+  if (savingBlocked || !loaded) return;
+  void saveData(data).catch((e) => {
+    notice = `保存できません。バックアップを書き出してください：${e.message}`;
+    emit();
+  });
 }
 export const store = {
   get data() {
@@ -64,7 +60,8 @@ export const store = {
     try {
       data = await readData();
     } catch (e) {
-      notice = `保存データを読み込めません。元データを保持しています：${e instanceof Error ? e.message : String(e)}`;
+      savingBlocked = true;
+      notice = `保存データを読み込めません。元データ保護のため自動保存を停止しました。バックアップの読み込みで復元してください：${e instanceof Error ? e.message : String(e)}`;
     }
     loaded = true;
     piped.preferred = data.settings.instance;
@@ -80,6 +77,9 @@ export const store = {
     data = fn(data);
     persist();
     emit();
+  },
+  enableSaving() {
+    savingBlocked = false;
   },
   notify(message: string) {
     notice = message;
@@ -304,8 +304,7 @@ export const store = {
     }));
   },
   async flush() {
-    clearTimeout(saveTimer);
-    await saveData(data);
+    if (!savingBlocked && loaded) await saveData(data);
   },
 };
 player.onState = (s) => {
@@ -394,6 +393,11 @@ if ("mediaSession" in navigator) {
 }
 window.addEventListener("pagehide", () => {
   data = { ...data, position: player.state.position };
+  if (!savingBlocked && loaded) {
+    try {
+      sessionStorage.setItem("musicpleasure-recovery", JSON.stringify(data));
+    } catch {}
+  }
   void store.flush();
 });
 window.addEventListener("online", () =>
