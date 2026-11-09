@@ -3,7 +3,7 @@ import { db } from "./db";
 import { useStore } from "./store";
 import { createJob, jobs, fetchAudio } from "./api";
 import type { Track, DownloadJob } from "./types";
-import type { YouTubeController } from "./youtube";
+import { cachedAudio, storeAudio, sourceKey } from "./cache";
 export const audio = new Audio();
 audio.preload = "metadata";
 audio.hidden = true;
@@ -16,8 +16,8 @@ interface Playback {
   duration: number;
   jobs: DownloadJob[];
   cacheRevision: number;
-  engine: "audio" | "youtube" | null;
-  videoId: string;
+  engine: "audio" | null;
+  phase: string;
   requestId: number;
   ready: boolean;
   notice: string;
@@ -30,7 +30,7 @@ export const usePlayback = create<Playback>(() => ({
   jobs: [],
   cacheRevision: 0,
   engine: null,
-  videoId: "",
+  phase: "",
   requestId: 0,
   ready: false,
   notice: "",
@@ -49,57 +49,76 @@ function pollJobs() {
   }
   return sharedJobs;
 }
-async function cachedAudio(track: Track): Promise<Blob | undefined> {
-  for (const source of track.sources) {
-    const cached = await db.assets.get(source.id);
-    if (cached) return cached.blob;
-  }
+// All consumers share a task by video ID, including cache validation and writes.
+let activeDownloads = 0;
+const slots: (() => void)[] = [];
+async function acquire() {
+  if (activeDownloads >= 2) await new Promise<void>(resolve => slots.push(resolve));
+  else activeDownloads++;
 }
-export async function ensureAudio(track: Track): Promise<Blob> {
-  const cached = await cachedAudio(track);
-  if (cached) return cached;
-  const source = track.sources.find(
-    (s) => s.provider === "youtube" && s.videoId,
-  );
-  if (!source?.videoId)
-    throw new Error("音声が端末にありません。MP3を再度読み込んでください");
-  if (pending.has(source.id)) return pending.get(source.id)!;
+function release() {
+  const next = slots.shift();
+  if (next) next(); else activeDownloads--;
+}
+export function ensureAudio(track: Track): Promise<Blob> {
+  const source = track.sources.find(s => s.provider === 'youtube' && s.videoId);
+  const key = source ? sourceKey(source) : track.sources[0]?.id || track.id;
+  if (pending.has(key)) return pending.get(key)!;
   const task = (async () => {
-    let job = await createJob(source.videoId!);
-    let tries = 0;
-    while (!["ready", "failed", "cancelled"].includes(job.state)) {
-      if (tries++ > 310) throw new Error("音源の準備がタイムアウトしました");
-      await delay(1000);
-      const all = await pollJobs();
-      usePlayback.setState({ jobs: all });
-      const updated = all.find((j) => j.id === job.id);
-      if (!updated) throw new Error("音声ジョブが削除されました");
-      job = updated;
-    }
-    usePlayback.setState((s) => ({
-      jobs: [job, ...s.jobs.filter((j) => j.id !== job.id)],
-    }));
-    if (job.state !== "ready")
-      throw new Error(job.error || "ダウンロードがキャンセルされました");
-    const blob = await fetchAudio(job.id);
+    const cached = await cachedAudio(track);
+    if (cached) return cached;
+    if (!source?.videoId) throw new Error('音声が端末にありません。MP3を再度読み込んでください');
+    if (navigator.onLine === false) throw new Error('オフラインです。この曲は端末に保存されていません');
+    await acquire();
     try {
-      await db.assets.put({
-        id: source.id,
-        sourceId: source.id,
-        blob,
-        bytes: blob.size,
-        createdAt: Date.now(),
-      });
-      usePlayback.setState((s) => ({ cacheRevision: s.cacheRevision + 1 }));
-    } catch {
-      throw new Error(
-        "MP3の端末内保存に失敗しました。空き容量を確認してください",
-      );
-    }
-    return blob;
-  })().finally(() => pending.delete(source.id));
-  pending.set(source.id, task);
+      let job = await createJob(source.videoId);
+      usePlayback.setState(s => ({ jobs: [job, ...s.jobs.filter(j => j.id !== job.id)] }));
+      const deadline = Date.now() + 330000;
+      while (!['ready', 'failed', 'cancelled'].includes(job.state)) {
+        if (Date.now() > deadline) throw new Error('音源の準備がタイムアウトしました。再試行してください');
+        await delay(1000);
+        const all = await pollJobs();
+        usePlayback.setState({ jobs: all });
+        const updated = all.find(j => j.id === job.id);
+        if (!updated) throw new Error('音源取得ジョブが見つかりません。再試行してください');
+        job = updated;
+      }
+      if (job.state !== 'ready') throw new Error(job.error || '音源の取得が中止されました');
+      const blob = await fetchAudio(job.id);
+      await storeAudio(key, blob);
+      usePlayback.setState(s => ({ cacheRevision: s.cacheRevision + 1 }));
+      return blob;
+    } finally { release(); }
+  })().finally(() => pending.delete(key));
+  pending.set(key, task);
   return task;
+}
+export async function saveTracks(tracks: Track[]) {
+  let index = 0;
+  const errors: string[] = [];
+  await Promise.all(Array.from({ length: Math.min(2, tracks.length) }, async () => {
+    while (index < tracks.length) {
+      const t = tracks[index++];
+      try { await ensureAudio(t); } catch(e) { errors.push(`${t.title}: ${e instanceof Error ? e.message : '取得失敗'}`); }
+    }
+  }));
+  if (errors.length) throw new Error(errors.join(' / '));
+}
+let prefetched = '';
+let prefetchBusy = false;
+function prefetchNext() {
+  const connection = (navigator as Navigator & {connection?: {saveData?: boolean; effectiveType?: string}}).connection;
+  if (prefetchBusy || navigator.onLine === false || connection?.saveData || /(^|-)2g/.test(connection?.effectiveType || '')) return;
+  const s = useStore.getState();
+  if (s.settings.repeat === 'one') return;
+  const index = s.queue.findIndex(q => q.id === s.currentId);
+  const entry = s.queue[index + 1] || (s.settings.repeat === 'all' ? s.queue[0] : undefined);
+  if (!entry || entry.id === s.currentId || prefetched === entry.id) return;
+  const t = s.tracks[entry.trackId];
+  if (!t) return;
+  prefetched = entry.id;
+  prefetchBusy = true;
+  void ensureAudio(t).catch(() => { /* foreground play exposes a retryable error */ }).finally(() => { prefetchBusy = false; });
 }
 let generation = 0,
   objectUrl = "",
@@ -107,7 +126,7 @@ let generation = 0,
   loading = false,
   lastSave = 0,
   recorded = false;
-let youtube: YouTubeController | undefined;
+
 function metadata(t: Track) {
   if ("mediaSession" in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({
@@ -128,64 +147,13 @@ function savePosition(time: number, duration: number) {
   if (!Number.isFinite(time) || !Number.isFinite(duration) || duration <= 0)
     return;
   usePlayback.setState({ time, duration });
+  if ('mediaSession' in navigator && navigator.mediaSession.setPositionState) {
+    try { navigator.mediaSession.setPositionState({duration, playbackRate:1, position:Math.min(time,duration)}); } catch { /* unsupported platform */ }
+  }
   if (Date.now() - lastSave > 2000) {
     useStore.setState({ position: time });
     lastSave = Date.now();
   }
-}
-export function connectYouTube(run: number, controller: YouTubeController) {
-  if (run !== generation || usePlayback.getState().engine !== "youtube")
-    return false;
-  youtube = controller;
-  loading = false;
-  controller.setVolume(useStore.getState().settings.volume * 100);
-  usePlayback.setState({ ready: true });
-  if (intent) controller.playVideo();
-  else usePlayback.setState({ status: "paused" });
-  return true;
-}
-export function youtubeProgress(run: number, time: number, duration: number) {
-  if (run === generation && usePlayback.getState().status === "playing")
-    savePosition(time, duration);
-}
-export function youtubeState(run: number, state: number) {
-  if (run !== generation || usePlayback.getState().engine !== "youtube") return;
-  if (usePlayback.getState().status === "error") {
-    if (state === 1) youtube?.pauseVideo();
-    return;
-  }
-  if (state === 1) {
-    intent = true;
-    usePlayback.setState({ status: "playing", error: "", notice: "" });
-    recordCurrentPlay();
-  } else if (state === 2 || state === 5) {
-    usePlayback.setState({ status: "paused" });
-    if (state === 2) {
-      intent = false;
-      if (youtube) useStore.setState({ position: youtube.getCurrentTime() });
-    }
-  } else if (state === 3) usePlayback.setState({ status: "loading" });
-  else if (state === 0) void next(true);
-  if ("mediaSession" in navigator)
-    navigator.mediaSession.playbackState =
-      state === 1 && intent ? "playing" : "paused";
-}
-export function youtubeBlocked(run: number) {
-  if (run !== generation) return;
-  intent = false;
-  usePlayback.setState({
-    status: "paused",
-    notice: "再生が保留されています。映像内の再生ボタンを押してください",
-  });
-}
-export function youtubeFailure(run: number, error: string) {
-  if (run !== generation) return;
-  loading = false;
-  intent = false;
-  youtube?.pauseVideo();
-  if ("mediaSession" in navigator)
-    navigator.mediaSession.playbackState = "paused";
-  usePlayback.setState({ status: "error", error, notice: "", ready: false });
 }
 export async function startCurrent(resume = true) {
   const s = useStore.getState(),
@@ -195,10 +163,10 @@ export async function startCurrent(resume = true) {
   const run = ++generation;
   intent = resume;
   loading = true;
-  youtube?.pauseVideo();
-  youtube = undefined;
   if ("mediaSession" in navigator)
     navigator.mediaSession.playbackState = "paused";
+  usePlayback.setState({engine: null});
+  audio.onloadedmetadata = null;
   audio.pause();
   audio.removeAttribute("src");
   audio.load();
@@ -209,30 +177,19 @@ export async function startCurrent(resume = true) {
     time: s.position,
     duration: t.duration,
     engine: null,
-    videoId: "",
     requestId: run,
     ready: false,
     notice: "",
+    phase: "音源を準備中",
   });
   try {
-    const cached = await cachedAudio(t);
-    if (run !== generation) return;
-    const source = t.sources.find(
-      (s) => s.provider === "youtube" && /^[\w-]{11}$/.test(s.videoId || ""),
-    );
+    const blob = await ensureAudio(t);
+    if (run !== generation || useStore.getState().currentId !== entry.id) return;
     metadata(t);
-    if (!cached && source?.videoId) {
-      usePlayback.setState({ engine: "youtube", videoId: source.videoId });
-      return;
-    }
-    if (!cached)
-      throw new Error("音声が端末にありません。MP3を再度読み込んでください");
-    const blob = cached;
-    if (run !== generation) return;
     loading = false;
     if (objectUrl) URL.revokeObjectURL(objectUrl);
     objectUrl = URL.createObjectURL(blob);
-    usePlayback.setState({ engine: "audio" });
+    usePlayback.setState({ engine: "audio", phase: "再生可能" });
     audio.src = objectUrl;
     audio.volume = s.settings.volume;
     audio.onloadedmetadata = () => {
@@ -250,7 +207,11 @@ export async function startCurrent(resume = true) {
           },
         }));
     };
-    if (intent) await audio.play();
+    if (intent) {
+      await audio.play();
+      if (run !== generation) return;
+      if (!intent) audio.pause();
+    }
     else usePlayback.setState({ status: "paused" });
   } catch (e) {
     if (run === generation) {
@@ -268,21 +229,7 @@ export async function playTracks(ts: Track[], index = 0) {
 }
 export async function togglePlayback() {
   const status = usePlayback.getState().status;
-  if (
-    usePlayback.getState().engine === "youtube" &&
-    youtube &&
-    usePlayback.getState().ready &&
-    status !== "error"
-  ) {
-    intent = !(status === "playing" || (status === "loading" && intent));
-    if (intent) {
-      usePlayback.setState({ status: "loading", notice: "" });
-      youtube.playVideo();
-    } else {
-      youtube.pauseVideo();
-      usePlayback.setState({ status: "paused" });
-    }
-  } else if (loading) {
+  if (loading) {
     intent = !intent;
     usePlayback.setState({ status: intent ? "loading" : "paused" });
   } else if (status === "playing") {
@@ -302,17 +249,7 @@ export async function togglePlayback() {
 }
 export function seek(time: number) {
   if (!Number.isFinite(time)) return;
-  if (usePlayback.getState().engine === "youtube") {
-    if (!youtube || !usePlayback.getState().ready) return;
-    const duration = youtube.getDuration();
-    if (!Number.isFinite(duration) || duration <= 0) return;
-    const target = Math.max(0, Math.min(time, duration));
-    youtube.seekTo(target, true);
-    usePlayback.setState({ time: target, duration });
-    useStore.setState({ position: target });
-    return;
-  }
-  if (!Number.isFinite(audio.duration)) return;
+  if (!usePlayback.getState().ready || !Number.isFinite(audio.duration)) return;
   audio.currentTime = Math.max(0, Math.min(time, audio.duration));
   usePlayback.setState({ time: audio.currentTime });
   useStore.setState({ position: audio.currentTime });
@@ -323,15 +260,13 @@ export async function next(auto = false) {
   if (auto && s.settings.repeat === "one") {
     seek(0);
     intent = true;
-    if (usePlayback.getState().engine === "youtube") youtube?.playVideo();
-    else await audio.play();
+    try { await audio.play(); } catch { usePlayback.setState({status: "error", error: "再生を再開できませんでした。再試行してください"}); }
     return;
   }
   const n =
     i + 1 < s.queue.length ? i + 1 : s.settings.repeat === "all" ? 0 : -1;
   if (n < 0) {
     intent = false;
-    youtube?.pauseVideo();
     audio.pause();
     seek(0);
     usePlayback.setState({ status: "paused" });
@@ -354,14 +289,29 @@ export function selectQueue(id: string) {
   useStore.getState().setCurrent(id);
   void startCurrent();
 }
-export function clearPlayback() {
+export function stopPlayback() {
   generation++;
-  if ("mediaSession" in navigator)
-    navigator.mediaSession.playbackState = "paused";
-  youtube?.pauseVideo();
-  youtube = undefined;
   loading = false;
   intent = false;
+  usePlayback.setState({engine:null, status:'paused', time:0, ready:false, phase:'', notice:''});
+  audio.onloadedmetadata = null;
+  audio.pause();
+  audio.removeAttribute('src');
+  audio.load();
+  if (objectUrl) URL.revokeObjectURL(objectUrl);
+  objectUrl = '';
+  useStore.setState({position:0});
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState='paused';
+}
+export function clearPlayback() {
+  generation++;
+  prefetched = "";
+  if ("mediaSession" in navigator)
+    navigator.mediaSession.playbackState = "paused";
+  loading = false;
+  intent = false;
+  usePlayback.setState({engine: null});
+  audio.onloadedmetadata = null;
   audio.pause();
   audio.removeAttribute("src");
   audio.load();
@@ -374,7 +324,7 @@ export function clearPlayback() {
     duration: 0,
     error: "",
     engine: null,
-    videoId: "",
+    phase: "",
     ready: false,
     notice: "",
   });
@@ -397,16 +347,19 @@ export function shuffleQueue() {
   });
 }
 audio.addEventListener("playing", () => {
-  if (usePlayback.getState().engine !== "audio") return;
-  usePlayback.setState({ status: "playing", error: "" });
+  if (usePlayback.getState().engine !== "audio" || audio.paused) return;
+  if (!intent) { audio.pause(); return; }
+  usePlayback.setState({ status: "playing", error: "", phase: "オフライン再生可能" });
   if ("mediaSession" in navigator)
     navigator.mediaSession.playbackState = "playing";
   recordCurrentPlay();
+  prefetchNext();
 });
 audio.addEventListener("pause", () => {
   if (usePlayback.getState().engine !== "audio") return;
   if (usePlayback.getState().status === "playing")
     usePlayback.setState({ status: "paused" });
+  if (Number.isFinite(audio.currentTime)) useStore.setState({ position: audio.currentTime });
   if ("mediaSession" in navigator)
     navigator.mediaSession.playbackState = "paused";
 });
@@ -420,19 +373,29 @@ audio.addEventListener("ended", () => {
 });
 audio.addEventListener("error", () => {
   if (usePlayback.getState().engine !== "audio") return;
-  if (audio.src)
+  if (audio.src) {
+    intent = false;
+    const s = useStore.getState(), t = s.tracks[s.queue.find(q => q.id === s.currentId)?.trackId || ""];
+    if (t) for (const source of t.sources) void db.assets.delete(sourceKey(source));
     usePlayback.setState({
       status: "error",
       error:
         "音声を再生できませんでした。再試行・次の曲へ進む操作を利用できます",
     });
+  }
 });
-useStore.subscribe((s) => {
+useStore.subscribe((s, previous) => {
   audio.volume = s.settings.volume;
-  youtube?.setVolume(s.settings.volume * 100);
+  if (previous.currentId && s.currentId !== previous.currentId && loading) {
+    // setCurrent is normally followed synchronously by startCurrent; invalidate any old waiter.
+    generation++;
+    if (!s.currentId) clearPlayback();
+  }
+  if (s.queue !== previous.queue && usePlayback.getState().status === 'playing') prefetchNext();
 });
 if ("mediaSession" in navigator) {
   for (const [action, handler] of Object.entries({
+    stop: stopPlayback,
     play: () => {
       if (loading) {
         intent = true;
@@ -442,10 +405,7 @@ if ("mediaSession" in navigator) {
     },
     pause: () => {
       intent = false;
-      youtube?.pauseVideo();
-      audio.pause();
-      if (usePlayback.getState().engine === "youtube")
-        usePlayback.setState({ status: "paused" });
+        audio.pause();
       if (loading) usePlayback.setState({ status: "paused" });
     },
     nexttrack: () => {
@@ -467,3 +427,12 @@ if ("mediaSession" in navigator) {
       /* platform may not support individual actions */
     }
 }
+
+usePlayback.subscribe((state, previous) => {
+  if (state.jobs === previous.jobs) return;
+  const s = useStore.getState();
+  const track = s.tracks[s.queue.find(q => q.id === s.currentId)?.trackId || ''];
+  const videoId = track?.sources.find(source => source.provider === 'youtube')?.videoId;
+  const job = state.jobs.find(j => j.videoId === videoId);
+  if (job && loading) usePlayback.setState({phase: ({queued: '音源を準備中', downloading: 'ダウンロード中', converting: 'MP3を変換中', ready: '端末に保存中', failed: '取得失敗', cancelled: '取得中止'})[job.state]});
+});

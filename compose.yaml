@@ -4,7 +4,8 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      MUSICPLEASURE_TOKEN: ${MUSICPLEASURE_TOKEN:?Set MUSICPLEASURE_TOKEN in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET on the server}
+      MUSICPLEASURE_TOKEN: ${MUSICPLEASURE_TOKEN:-}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
       YOUTUBE_DAILY_BUDGET: ${YOUTUBE_DAILY_BUDGET:-8000}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -44,3 +45,4 @@ services:
     restart: unless-stopped
 volumes:
   music-data:
+  # Use a real DNS name pointing to the host. Caddy obtains/renews TLS automatically.

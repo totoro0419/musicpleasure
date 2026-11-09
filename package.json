@@ -7,7 +7,8 @@
     "dev": "node scripts/dev.mjs",
     "build": "tsc -b && vite build",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "check:playback": "node scripts/verify-no-iframe.mjs"
   },
   "dependencies": {
     "@noble/hashes": "^2.0.1",
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.56.0",
+    "@types/node": "^24.19.2",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.0.0",

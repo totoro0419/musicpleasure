@@ -3,12 +3,14 @@ import type { AudioAsset, Snapshot } from "./types";
 class MusicDB extends Dexie {
   snapshots!: Table<{ id: string; value: Snapshot }, string>;
   assets!: Table<AudioAsset, string>;
+  credentials!: Table<{id: string; credential: string}, string>;
   constructor() {
     super("musicpleasure");
     this.version(1).stores({
       snapshots: "id",
       assets: "id,sourceId,createdAt",
     });
+    this.version(2).stores({ credentials: "id" });
   }
 }
 export const db = new MusicDB();

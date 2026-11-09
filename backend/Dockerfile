@@ -7,4 +7,4 @@ RUN pip install --no-cache-dir -r requirements.lock && useradd --uid 10001 --cre
 COPY backend /app/backend
 USER music
 EXPOSE 8000
-CMD ["uvicorn","backend.app.main:app","--host","0.0.0.0","--port","8000","--workers","1"]
+CMD ["uvicorn","backend.app.main:app","--host","0.0.0.0","--port","8000","--workers","1","--proxy-headers","--forwarded-allow-ips","*"]
