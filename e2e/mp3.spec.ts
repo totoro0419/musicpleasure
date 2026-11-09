@@ -61,7 +61,7 @@ test('a superseded download cannot replace the selected song',async({page})=>{
   const {created,forbidden}=await transport(page,()=>gate);await search(page);
   await page.getByRole('button',{name:'MP3 fixture 1を再生',exact:true}).click();
   await expect.poll(()=>created.length).toBe(1);
-  await page.getByRole('button',{name:'MP3 fixture 2を再生',exact:true}).click();await playing(page);
+  await page.locator('.track-list').last().getByRole('button',{name:'MP3 fixture 2を再生',exact:true}).click();await playing(page);
   const src=await page.locator('audio').getAttribute('src');finish();
   await expect.poll(()=>created.length).toBe(3);await page.waitForTimeout(300);
   expect(await page.locator('audio').getAttribute('src')).toBe(src);
