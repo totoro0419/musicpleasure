@@ -275,8 +275,10 @@ export async function togglePlayback() {
     status !== "error"
   ) {
     intent = !(status === "playing" || (status === "loading" && intent));
-    if (intent) youtube.playVideo();
-    else {
+    if (intent) {
+      usePlayback.setState({ status: "loading", notice: "" });
+      youtube.playVideo();
+    } else {
       youtube.pauseVideo();
       usePlayback.setState({ status: "paused" });
     }

@@ -7,10 +7,11 @@ window.YT = {Player: class {
     this.events = events; this.time = Number(new URL(frame.src).searchParams.get('start')) || 0;
     this.playing = false; frame.dataset.instance = String(performance.now());
     this.error = frame.src.includes('bbbbbbbbbbb');
+    this.silent = frame.src.includes('ccccccccccc');
     this.timer = setInterval(() => { if(this.playing) this.time += .2; }, 200);
     setTimeout(() => events.onReady({target:this}), 0);
   }
-  playVideo() { if(this.error) { this.events.onError({data:150}); return; } this.playing=true; this.events.onStateChange({data:1}); }
+  playVideo() { if(this.silent) return; if(this.error) { this.events.onError({data:150}); return; } this.playing=true; this.events.onStateChange({data:1}); }
   pauseVideo() { this.playing=false; this.events.onStateChange({data:2}); }
   seekTo(time) { this.time=time; }
   setVolume(v) { this.volume=v; }
@@ -59,6 +60,7 @@ test.beforeEach(async ({ page }) => {
         items: [
           fixtureTrack("M7lc1UVf-VE", "Stream fixture"),
           fixtureTrack("bbbbbbbbbbb", "Blocked fixture"),
+          fixtureTrack("ccccccccccc", "Silent fixture"),
         ],
         nextPageToken: "",
         provider: "transport-test-fixture",
@@ -174,4 +176,32 @@ test("embedding failure exposes recovery and does not block search or navigation
     .last()
     .click();
   await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("an iframe that becomes ready but never plays times out with recovery", async ({
+  page,
+}) => {
+  await page.clock.install();
+  await page.goto("/#search");
+  await page
+    .getByLabel("曲・アーティスト・YouTube URLを検索", { exact: true })
+    .fill("silent fixture");
+  await page.clock.runFor(500);
+  await page
+    .getByRole("button", { name: "Silent fixtureを再生", exact: true })
+    .click();
+  await expect(page.locator(".youtube-frame iframe")).toBeVisible();
+  await page.clock.runFor(32000);
+  await expect(page.getByRole("alert")).toContainText(
+    "再生が始まりませんでした",
+  );
+  await expect(
+    page.getByRole("button", { name: "再試行", exact: true }),
+  ).toBeVisible();
+  const small = page.viewportSize()!.width < 761;
+  const nav = page.getByRole("navigation", {
+    name: small ? "モバイルナビゲーション" : "メインナビゲーション",
+  });
+  await nav.getByRole("link", { name: "ホーム", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /音楽に/ })).toBeVisible();
 });
