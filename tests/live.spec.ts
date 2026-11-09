@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
-import tracks from "./fixtures/piped-tracks.json";
+import tracks from "./fixtures/piped-tracks.json" with { type: "json" };
 import { emptyData, newPlaylist } from "../src/lib/model";
 test("ten real YouTube posts: Piped media, failure skips and radio (no mocks)", async ({
   page,
