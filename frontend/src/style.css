@@ -3288,3 +3288,8 @@ dialog.wide {
 @media (max-height:600px) {
   .youtube-player:not(.youtube-expanded) { position:relative; top:auto; }
 }
+
+.youtube-controls { width:100%; max-width:900px; margin:16px auto 0; }
+.youtube-transport { display:flex; justify-content:center; align-items:center; gap:14px; padding-top:12px; }
+.youtube-transport > input { width:90px; }
+.youtube-transport .play-button { flex-shrink:0; }

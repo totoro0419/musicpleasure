@@ -47,15 +47,27 @@ export function loadYouTubeApi(): Promise<YouTubeApi> {
       } else resolve(window.YT);
     };
     const timeout = setTimeout(
-      () => finish(new Error("YouTubeへの接続がタイムアウトしました。再試行してください")),
+      () =>
+        finish(
+          new Error(
+            "YouTubeへの接続がタイムアウトしました。再試行してください",
+          ),
+        ),
       15000,
     );
     window.onYouTubeIframeAPIReady = () => {
-      try { previous?.(); } finally { finish(); }
+      try {
+        previous?.();
+      } finally {
+        finish();
+      }
     };
     script.src = "https://www.youtube.com/iframe_api";
     script.async = true;
-    script.onerror = () => finish(new Error("YouTubeに接続できません。通信を確認して再試行してください"));
+    script.onerror = () =>
+      finish(
+        new Error("YouTubeに接続できません。通信を確認して再試行してください"),
+      );
     document.head.append(script);
   });
   return pending;

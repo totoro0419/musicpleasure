@@ -20,26 +20,73 @@ window.YT = {Player: class {
 }};
 window.onYouTubeIframeAPIReady();`;
 function fixtureTrack(id: string, title: string) {
-  return {id: "yt:"+id, title, artist: "Transport test fixture", duration: 100, thumbnail: "", sources: [
-    {id: "youtube:"+id, provider: "youtube", videoId: id, url: "https://www.youtube.com/watch?v="+id, kind: "unknown", evidence: "test fixture", official: false},
-  ]};
+  return {
+    id: "yt:" + id,
+    title,
+    artist: "Transport test fixture",
+    duration: 100,
+    thumbnail: "",
+    sources: [
+      {
+        id: "youtube:" + id,
+        provider: "youtube",
+        videoId: id,
+        url: "https://www.youtube.com/watch?v=" + id,
+        kind: "unknown",
+        evidence: "test fixture",
+        official: false,
+      },
+    ],
+  };
 }
-test.beforeEach(async ({page}) => {
-  await page.route("https://www.youtube.com/iframe_api", route => route.fulfill({contentType: "application/javascript", body: iframeApiFixture}));
-  await page.route("https://www.youtube.com/embed/**", route => route.fulfill({contentType: "text/html", body: "<!doctype html><title>Transport test fixture</title>"}));
-  await page.route("**/api/search?**", route => route.fulfill({contentType: "application/json", body: JSON.stringify({items: [fixtureTrack("M7lc1UVf-VE", "Stream fixture"), fixtureTrack("bbbbbbbbbbb", "Blocked fixture")], nextPageToken: "", provider: "transport-test-fixture"})}));
+test.beforeEach(async ({ page }) => {
+  await page.route("https://www.youtube.com/iframe_api", (route) =>
+    route.fulfill({
+      contentType: "application/javascript",
+      body: iframeApiFixture,
+    }),
+  );
+  await page.route("https://www.youtube.com/embed/**", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: "<!doctype html><title>Transport test fixture</title>",
+    }),
+  );
+  await page.route("**/api/search?**", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          fixtureTrack("M7lc1UVf-VE", "Stream fixture"),
+          fixtureTrack("bbbbbbbbbbb", "Blocked fixture"),
+        ],
+        nextPageToken: "",
+        provider: "transport-test-fixture",
+      }),
+    }),
+  );
 });
-test("streaming transport controls, navigation, stable iframe, layout and resume", async ({page}) => {
+test("streaming transport controls, navigation, stable iframe, layout and resume", async ({
+  page,
+}) => {
   const jobs: string[] = [];
-  page.on("request", r => { if (r.url().includes("/api/jobs")) jobs.push(r.url()); });
+  page.on("request", (r) => {
+    if (r.url().includes("/api/jobs")) jobs.push(r.url());
+  });
   await page.goto("/#search");
-  await page.getByLabel("曲・アーティスト・YouTube URLを検索", {exact:true}).fill("transport fixture");
-  await page.getByRole("button", {name:"Stream fixtureを再生",exact:true}).click();
+  await page
+    .getByLabel("曲・アーティスト・YouTube URLを検索", { exact: true })
+    .fill("transport fixture");
+  await page
+    .getByRole("button", { name: "Stream fixtureを再生", exact: true })
+    .click();
   const frame = page.locator(".youtube-frame iframe");
   await expect(frame).toBeVisible();
   const instance = await frame.getAttribute("data-instance");
   const small = page.viewportSize()!.width < 761;
-  const playButton = small ? page.locator(".mobile-play button").first() : page.locator(".transport .play-button");
+  const playButton = small
+    ? page.locator(".mobile-play button").first()
+    : page.locator(".transport .play-button");
   await expect(playButton).toHaveAttribute("aria-label", "一時停止");
   const box = await frame.boundingBox();
   expect(box!.width).toBeGreaterThanOrEqual(200);
@@ -47,41 +94,84 @@ test("streaming transport controls, navigation, stable iframe, layout and resume
   await playButton.click();
   await expect(playButton).toHaveAttribute("aria-label", "再生");
   // Seek through the shared control even though HTMLAudioElement has no src.
-  if (small) await page.getByRole("button", {name:"YouTubeプレーヤーを拡大",exact:true}).click();
-  else {
-    const seek = page.getByLabel("再生位置", {exact:true});
-    await seek.press("Home"); await seek.press("ArrowRight");
+  if (small) {
+    await page
+      .getByRole("button", { name: "YouTubeプレーヤーを拡大", exact: true })
+      .click();
+    const seek = page.getByLabel("YouTubeの再生位置", { exact: true });
+    await seek.press("Home");
+    await seek.press("ArrowRight");
+    await expect(seek).toHaveValue("0.1");
+  } else {
+    const seek = page.getByLabel("再生位置", { exact: true });
+    await seek.press("Home");
+    await seek.press("ArrowRight");
     await expect(seek).toHaveValue("0.1");
   }
-  await page.getByRole("button", {name: small ? "YouTubeプレーヤーを縮小" : "YouTubeプレーヤーを拡大",exact:true}).click();
+  await page
+    .getByRole("button", {
+      name: small ? "YouTubeプレーヤーを縮小" : "YouTubeプレーヤーを拡大",
+      exact: true,
+    })
+    .click();
   expect(await frame.getAttribute("data-instance")).toBe(instance);
-  if (!small) await page.getByRole("button", {name:"YouTubeプレーヤーを縮小",exact:true}).click();
-  const nav = page.getByRole("navigation", {name: small ? "モバイルナビゲーション" : "メインナビゲーション"});
-  await nav.getByRole("link", {name:"ライブラリ",exact:true}).click();
+  if (!small)
+    await page
+      .getByRole("button", { name: "YouTubeプレーヤーを縮小", exact: true })
+      .click();
+  const nav = page.getByRole("navigation", {
+    name: small ? "モバイルナビゲーション" : "メインナビゲーション",
+  });
+  await nav.getByRole("link", { name: "ライブラリ", exact: true }).click();
   expect(await frame.getAttribute("data-instance")).toBe(instance);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth,
+    ),
+  ).toBe(false);
   await playButton.click();
   await expect(playButton).toHaveAttribute("aria-label", "一時停止");
   await page.waitForTimeout(2600); // Exercise time-based autosave, not just initial state.
   await playButton.click();
   await page.waitForTimeout(600);
   await page.reload();
-  await expect(page.getByRole("button",{name:"フルプレーヤーを開く"})).toContainText("Stream fixture");
+  await expect(
+    page.getByRole("button", { name: "フルプレーヤーを開く" }),
+  ).toContainText("Stream fixture");
   await expect(page.locator(".youtube-frame iframe")).toHaveCount(0); // Restore without surprise autoplay.
   await playButton.click();
   await expect(frame).toBeVisible();
-  expect(Number(new URL((await frame.getAttribute("src"))!).searchParams.get("start"))).toBeGreaterThan(0);
+  expect(
+    Number(
+      new URL((await frame.getAttribute("src"))!).searchParams.get("start"),
+    ),
+  ).toBeGreaterThan(0);
   expect(jobs).toEqual([]);
 });
-test("embedding failure exposes recovery and does not block search or navigation", async ({page}) => {
+test("embedding failure exposes recovery and does not block search or navigation", async ({
+  page,
+}) => {
   await page.goto("/#search");
-  await page.getByLabel("曲・アーティスト・YouTube URLを検索", {exact:true}).fill("transport fixture");
-  await page.getByRole("button",{name:"Blocked fixtureを再生",exact:true}).click();
-  await expect(page.getByRole("alert")).toContainText("埋め込み再生が許可されていません");
-  await expect(page.getByRole("link",{name:"YouTubeで開く",exact:true})).toBeVisible();
-  await page.getByRole("button",{name:"スキップ",exact:true}).click();
-  await page.getByRole("button",{name:"YouTube再生を終了",exact:true}).click();
+  await page
+    .getByLabel("曲・アーティスト・YouTube URLを検索", { exact: true })
+    .fill("transport fixture");
+  await page
+    .getByRole("button", { name: "Blocked fixtureを再生", exact: true })
+    .click();
+  await expect(page.getByRole("alert")).toContainText(
+    "埋め込み再生が許可されていません",
+  );
+  await expect(
+    page.getByRole("link", { name: "YouTubeで開く", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "スキップ", exact: true }).click();
+  await page
+    .getByRole("button", { name: "YouTube再生を終了", exact: true })
+    .click();
   await expect(page.locator(".youtube-frame iframe")).toHaveCount(0);
-  await page.getByRole("button",{name:"Stream fixtureを再生",exact:true}).click();
+  await page
+    .getByRole("button", { name: "Stream fixtureを再生", exact: true })
+    .last()
+    .click();
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
