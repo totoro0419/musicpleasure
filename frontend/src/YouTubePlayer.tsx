@@ -50,11 +50,11 @@ export default function YouTubePlayer({
     let player: YouTubeController | undefined;
     let timer: ReturnType<typeof setInterval> | undefined;
     let deadline: ReturnType<typeof setTimeout> | undefined;
-    let buffering: ReturnType<typeof setTimeout> | undefined;
+    let waitingSince = 0;
     const fail = (message: string) => {
       if (disposed) return;
       clearTimeout(deadline);
-      clearTimeout(buffering);
+      clearInterval(timer);
       youtubeFailure(requestId, message);
     };
     void loadYouTubeApi()
@@ -92,27 +92,38 @@ export default function YouTubePlayer({
               player = target;
               ready = true;
               clearTimeout(deadline);
-              if (!connectYouTube(requestId, target)) return;
+              if (
+                !connectYouTube(requestId, target) ||
+                usePlayback.getState().status === "error"
+              )
+                return;
               timer = setInterval(() => {
-                if (!disposed && ready && player)
-                  youtubeProgress(
-                    requestId,
-                    player.getCurrentTime(),
-                    player.getDuration(),
-                  );
+                const state = usePlayback.getState();
+                if (
+                  disposed ||
+                  !ready ||
+                  !player ||
+                  state.requestId !== requestId
+                )
+                  return;
+                if (state.status === "loading") {
+                  waitingSince ||= Date.now();
+                  if (Date.now() - waitingSince >= 30000) {
+                    fail(
+                      "YouTubeの再生が始まりませんでした。再試行するか、YouTubeで開いてください",
+                    );
+                    return;
+                  }
+                } else waitingSince = 0;
+                youtubeProgress(
+                  requestId,
+                  player.getCurrentTime(),
+                  player.getDuration(),
+                );
               }, 500);
             },
             onStateChange: ({ data }) => {
               if (disposed || !ready) return;
-              clearTimeout(buffering);
-              if (data === 3)
-                buffering = setTimeout(
-                  () =>
-                    fail(
-                      "動画の読み込みに時間がかかっています。通信を確認して再試行してください",
-                    ),
-                  30000,
-                );
               youtubeState(requestId, data);
             },
             onAutoplayBlocked: () => {
@@ -133,7 +144,6 @@ export default function YouTubePlayer({
       disposed = true;
       clearInterval(timer);
       clearTimeout(deadline);
-      clearTimeout(buffering);
       player?.destroy();
     };
     // One iframe per playback request; navigation, progress and expansion keep it alive.
