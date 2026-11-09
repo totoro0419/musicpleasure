@@ -2402,3 +2402,5 @@ html[data-theme="light"] .selected {
 .full-volume input {
   flex: 1;
 }
+
+.searchform > button { flex-shrink: 0; white-space: nowrap; }
