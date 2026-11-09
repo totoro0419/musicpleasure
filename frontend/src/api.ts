@@ -40,7 +40,14 @@ async function authorization(origin: string) {
   if (authenticating.has(origin)) return authenticating.get(origin)!;
   const task = (async () => {
     const saved = await db.credentials.get(origin || 'same-origin');
-    const r = await fetch(origin + '/api/session', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({credential:saved?.credential || ''}),signal:AbortSignal.timeout(15000)});
+    const enroll = (credential:string) => fetch(origin + '/api/session', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({credential}),signal:AbortSignal.timeout(15000)});
+    let r = await enroll(saved?.credential || '');
+    // A server restored without its old device table can enroll this public-app
+    // device again; rate limits still apply before authentication.
+    if (r.status === 401 && saved?.credential) {
+      await db.credentials.delete(origin || 'same-origin');
+      r = await enroll('');
+    }
     if (!r.ok) throw new Error('音源サーバーに認証できませんでした。再試行してください');
     const value = await r.json();
     if (!value.token || !value.credential || !Number.isFinite(value.expiresAt)) throw new Error('認証サーバーの応答が不正です');

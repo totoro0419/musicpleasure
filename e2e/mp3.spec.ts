@@ -27,7 +27,7 @@ async function playing(page:Page){await expect.poll(()=>page.locator('audio').ev
 test('one play click automatically downloads and plays; reload reuses persisted audio; no IFrame',async({page,context})=>{
   const {created,forbidden}=await transport(page);await search(page);
   await page.getByRole('button',{name:'MP3 fixture 1を再生',exact:true}).click();await playing(page);
-  expect(created).toEqual(['M7lc1UVf-VE']);
+  await expect.poll(()=>created.slice()).toEqual(['M7lc1UVf-VE','abcdefghijk']);
   await expect(page.locator('iframe')).toHaveCount(0);
   await page.getByRole('button',{name:'フルプレーヤーを開く'}).click();
   await page.getByRole('button',{name:'再生・停止',exact:true}).click();
@@ -40,7 +40,7 @@ test('one play click automatically downloads and plays; reload reuses persisted 
   await page.getByRole('button',{name:'フルプレーヤーを開く'}).click();
   await context.setOffline(true);
   await page.getByRole('button',{name:'再生・停止',exact:true}).click();await playing(page);
-  expect(created).toEqual(['M7lc1UVf-VE']);expect(forbidden).toEqual([]);
+  expect(created).toEqual(['M7lc1UVf-VE','abcdefghijk']);expect(forbidden).toEqual([]);
   await expect(page.locator('iframe')).toHaveCount(0);
   await context.setOffline(false);
 });
@@ -63,7 +63,7 @@ test('a superseded download cannot replace the selected song',async({page})=>{
   await expect.poll(()=>created.length).toBe(1);
   await page.getByRole('button',{name:'MP3 fixture 2を再生',exact:true}).click();await playing(page);
   const src=await page.locator('audio').getAttribute('src');finish();
-  await expect.poll(()=>created.length).toBe(2);await page.waitForTimeout(300);
+  await expect.poll(()=>created.length).toBe(3);await page.waitForTimeout(300);
   expect(await page.locator('audio').getAttribute('src')).toBe(src);
   expect(forbidden).toEqual([]);await expect(page.locator('iframe')).toHaveCount(0);
 });

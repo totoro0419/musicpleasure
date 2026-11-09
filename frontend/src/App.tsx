@@ -634,7 +634,7 @@ export default function App() {
               ? health.data.capabilities?.downloads === false
                 ? "検索接続済み"
                 : "バックエンド接続済み"
-              : "接続を確認中"}
+              : health.isPending ? "接続を確認中" : "サーバー未接続"}
           </button>
           {!install.installed && (
             <button

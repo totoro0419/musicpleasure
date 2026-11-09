@@ -178,3 +178,14 @@ it('stop during preparation cancels intent and resets the position without clear
   expect(player.audio.src).toBe('');expect(player.audio.paused).toBe(true);
   expect(useStore.getState().queue).toHaveLength(1);expect(useStore.getState().position).toBe(0);
 });
+it('limits actual downloads to two in flight even for explicit bulk requests',async()=>{
+  const one=deferred<DownloadJob>(),two=deferred<DownloadJob>();
+  mocks.createJob.mockImplementation((id:string)=>id==='M7lc1UVf-VE'?one.promise:id==='abcdefghijk'?two.promise:Promise.resolve(ready(id)));
+  const third={...second,id:'third',sources:[{...second.sources[0],id:'youtube:12345678901',videoId:'12345678901'}]};
+  const bulk=player.saveTracks([track,second,third]);
+  await vi.waitFor(()=>expect(mocks.createJob).toHaveBeenCalledTimes(2));
+  one.resolve(ready('M7lc1UVf-VE'));
+  await vi.waitFor(()=>expect(mocks.createJob).toHaveBeenCalledTimes(3));
+  two.resolve(ready('abcdefghijk'));await bulk;
+  expect(await db.assets.count()).toBe(3);
+});

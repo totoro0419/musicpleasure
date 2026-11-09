@@ -52,3 +52,13 @@ it('renews an expired bearer session without a user token prompt',async()=>{
   await api('/jobs');expect(sessions).toBe(2);expect(calls).toBe(2);
   expect(JSON.parse(fetch.mock.calls.filter(c=>c[0].endsWith('/session'))[1][1].body).credential).toBe('refresh');
 });
+it('recovers a stale device registration after server storage was restored',async()=>{
+  useStore.getState().settingsUpdate({apiUrl:'https://restored.example'});
+  await db.credentials.put({id:'https://restored.example',credential:'old-device'});
+  const fetch=vi.fn().mockImplementation(async(url:string,options:RequestInit)=>{
+    if(url.endsWith('/session'))return JSON.parse(options.body as string).credential ? json({detail:'unknown device'},401) : json({token:'new',credential:'new-device',expiresAt:Date.now()+900000});
+    return json([]);
+  });vi.stubGlobal('fetch',fetch);
+  await api('/jobs');
+  expect((await db.credentials.get('https://restored.example'))?.credential).toBe('new-device');
+});
