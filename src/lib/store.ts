@@ -11,6 +11,8 @@ import { readData, saveData } from "./storage";
 import { player, type PlaybackState } from "./player";
 import { piped } from "./piped";
 import { recommend } from "./recommend";
+import { reliability, classify } from "./reliability";
+import { QueueTraversal } from "./sequence";
 let data = emptyData();
 let playback = player.state;
 let notice = "";
@@ -21,7 +23,9 @@ let healthRevision = 0;
 let snapshot = { data, playback, notice, loaded, revision, healthRevision };
 const listeners = new Set<() => void>();
 let radioAbort: AbortController | undefined;
-let radioPending = false;
+let radioPending: Promise<void> | undefined;
+let prefetchAbort: AbortController | undefined;
+let radioEpoch = 0;
 let lastPositionSave = 0;
 let previous: Data[] = [];
 let future: Data[] = [];
@@ -63,6 +67,7 @@ export const store = {
       savingBlocked = true;
       notice = `保存データを読み込めません。元データ保護のため自動保存を停止しました。バックアップの読み込みで復元してください：${e instanceof Error ? e.message : String(e)}`;
     }
+    await reliability.init();
     loaded = true;
     piped.preferred = data.settings.instance;
     emit();
@@ -140,34 +145,32 @@ export const store = {
   },
   playList(ids: string[], index = 0) {
     radioAbort?.abort();
+    radioEpoch++;
+    radioPending = undefined;
     let queue = [...ids];
     if (data.shuffle) queue = shuffleTail(queue, index);
     this.update((d) => ({ ...d, queue, current: index, position: 0 }));
     void this.playCurrent();
   },
-  async playCurrent(position = 0) {
+  async playCurrent(position = 0, forceFirst = true) {
+    prefetchAbort?.abort();
+    await traversal.run(data.current, position, forceFirst);
     const id = data.queue[data.current];
-    if (!id || !data.tracks[id]) return;
-    const t = data.tracks[id];
-    this.update((d) => {
-      const prior = d.listening[id] || {
-        plays: 0,
-        seconds: 0,
-        skips: 0,
-        last: 0,
-        failed: 0,
-      };
-      return {
-        ...d,
-        history: unique([id, ...d.history]).slice(0, 1000),
-        listening: { ...d.listening, [id]: { ...prior, last: Date.now() } },
-        position,
-      };
-    });
-    await player.load(t, data.settings, position);
-    const next = data.queue[data.current + 1];
-    if (next) void player.prefetch(next, data.settings);
-    void this.fillRadio();
+    if (player.state.status === "playing" && player.state.trackId === id) {
+      prefetchAbort = new AbortController();
+      const signal = prefetchAbort.signal;
+      const next = data.queue
+        .slice(data.current + 1)
+        .filter((id) => !reliability.isExcluded(id))
+        .slice(0, 2);
+      void (async () => {
+        for (const id of next) {
+          if (signal.aborted) return;
+          await player.prefetch(id, data.settings, signal);
+        }
+      })();
+      void this.fillRadio();
+    }
   },
   toggle() {
     if (playback.status === "playing" || playback.status === "loading")
@@ -177,7 +180,11 @@ export const store = {
     else void this.playCurrent(data.position);
   },
   next(ended = false) {
-    if (!ended && data.queue[data.current]) {
+    if (
+      !ended &&
+      data.queue[data.current] &&
+      ["playing", "paused"].includes(playback.status)
+    ) {
       const id = data.queue[data.current];
       this.update((d) => {
         const stat = d.listening[id] || {
@@ -206,11 +213,16 @@ export const store = {
     const index = nextIndex(data, ended);
     if (index < 0) {
       player.stop();
-      if (data.radio) void this.fillRadio(true);
+      const epoch = radioEpoch;
+      if (data.radio)
+        void this.fillRadio().then(() => {
+          if (epoch !== radioEpoch) return;
+          if (data.queue.length > data.current + 1) this.next(true);
+        });
       return;
     }
     this.update((d) => ({ ...d, current: index, position: 0 }));
-    void this.playCurrent();
+    void this.playCurrent(0, false);
   },
   previous() {
     if (playback.position > 3) {
@@ -253,32 +265,57 @@ export const store = {
     this.update((d) => ({ ...d, radio: true }));
     this.playList([track.id]);
   },
-  async fillRadio(resume = false) {
-    if (!data.radio || radioPending || data.queue.length - data.current > 4)
-      return;
+  async fillRadio() {
+    if (!data.radio || data.queue.length - data.current > 4) return;
+    if (radioPending) return radioPending;
     const seed = data.tracks[data.queue[data.current]];
     if (!seed) return;
-    radioPending = true;
+    const epoch = radioEpoch;
     radioAbort?.abort();
     radioAbort = new AbortController();
     const signal = radioAbort.signal;
+    const job = (async () => {
+      try {
+        const candidates = await recommend(seed, data, signal);
+        if (signal.aborted || epoch !== radioEpoch || !data.radio) return;
+        const good: Track[] = [];
+        const pool = candidates
+          .filter(
+            (t) =>
+              !reliability.isExcluded(t.id) &&
+              !data.queue.includes(t.id) &&
+              !data.disliked.includes(t.id),
+          )
+          .slice(0, 8);
+        // Decode candidates silently before they become radio queue entries. Metadata alone is insufficient.
+        for (let i = 0; i < pool.length && good.length < 4; i += 2) {
+          const results = await Promise.all(
+            pool.slice(i, i + 2).map(async (t) => ({
+              t,
+              prepared: await player.prefetch(t.id, data.settings, signal),
+            })),
+          );
+          if (signal.aborted || epoch !== radioEpoch || !data.radio) return;
+          good.push(...results.filter((x) => x.prepared).map((x) => x.t));
+        }
+        if (signal.aborted || epoch !== radioEpoch || !data.radio) return;
+        this.addTracks(good);
+        const existing = new Set(data.queue);
+        this.enqueue(good.map((t) => t.id).filter((id) => !existing.has(id)));
+        if (!good.length)
+          this.notify(
+            "推薦候補は見つかりましたが、再生可能な音源を確認できませんでした。既存のキューは保持しています。",
+          );
+      } catch (e) {
+        if (!signal.aborted)
+          this.notify(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    radioPending = job;
     try {
-      const candidates = await recommend(seed, data, signal);
-      if (signal.aborted || !data.radio) return;
-      this.addTracks(candidates);
-      const excluded = new Set(data.queue);
-      const ids = candidates
-        .map((t) => t.id)
-        .filter((id) => !excluded.has(id) && !data.disliked.includes(id));
-      this.enqueue(ids.slice(0, 8));
-      if (resume && ids.length) this.next(true);
-      if (!ids.length)
-        this.notify("推薦候補が不足しています。別の曲を基準にしてください。");
-    } catch (e) {
-      if (!signal.aborted)
-        this.notify(e instanceof Error ? e.message : String(e));
+      await job;
     } finally {
-      radioPending = false;
+      if (radioPending === job) radioPending = undefined;
     }
   },
   undo() {
@@ -306,6 +343,83 @@ export const store = {
   async flush() {
     if (!savingBlocked && loaded) await saveData(data);
   },
+};
+const traversal = new QueueTraversal({
+  queue: () => data.queue,
+  current: () => data.current,
+  track: (id) => data.tracks[id],
+  excluded: (id) => reliability.isExcluded(id),
+  wrap: () => data.repeat === "all",
+  select: (index) =>
+    store.update((d) => ({ ...d, current: index, position: 0 })),
+  load: async (t, position) => {
+    store.update((d) => {
+      const stat = d.listening[t.id] || {
+        plays: 0,
+        seconds: 0,
+        skips: 0,
+        last: 0,
+        failed: 0,
+      };
+      return {
+        ...d,
+        history: unique([t.id, ...d.history]).slice(0, 1000),
+        listening: { ...d.listening, [t.id]: { ...stat, last: Date.now() } },
+        position,
+      };
+    });
+    return player.load(t, data.settings, position);
+  },
+  skip: (id, detail) => {
+    reliability.record({
+      trackId: id,
+      instance: "",
+      stage: "queue",
+      outcome: "skip",
+      detail,
+    });
+    store.notify(
+      `再生できない曲をスキップしました：${data.tracks[id]?.title || id}`,
+    );
+  },
+  replenish: async () => {
+    if (data.radio) await store.fillRadio();
+  },
+  exhausted: (track, count) => {
+    if (track)
+      player.unavailable(
+        track,
+        `確認した${count}曲に再生可能な曲がありません。キューを保持しました。接続回復後に再試行できます。`,
+      );
+    store.notify(
+      `再生可能な曲を確認できず停止しました（${count}曲確認）。無限再試行は行いません。`,
+    );
+  },
+});
+player.onIntent = () => {
+  traversal.cancel();
+  radioEpoch++;
+  radioAbort?.abort();
+  radioPending = undefined;
+  prefetchAbort?.abort();
+};
+player.onTerminalFailure = (id) => {
+  if (
+    !traversal.running &&
+    data.queue[data.current] === id &&
+    playback.status === "error"
+  ) {
+    if (
+      data.current + 1 < data.queue.length ||
+      data.repeat === "all" ||
+      data.radio
+    )
+      store.next();
+  }
+};
+reliability.onChange = () => {
+  healthRevision++;
+  emit();
 };
 player.onState = (s) => {
   playback = s;
@@ -377,7 +491,9 @@ if ("mediaSession" in navigator) {
   const actions: Partial<
     Record<MediaSessionAction, MediaSessionActionHandler>
   > = {
-    play: () => void player.play(),
+    play: () => {
+      if (playback.status !== "playing") store.toggle();
+    },
     pause: () => player.pause(),
     stop: () => player.stop(),
     nexttrack: () => store.next(),

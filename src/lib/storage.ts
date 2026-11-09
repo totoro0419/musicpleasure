@@ -55,3 +55,10 @@ export async function healthRead() {
 export async function healthSave(v: unknown) {
   await (await db()).put("state", v, "health");
 }
+
+export async function runtimeRead(key: string) {
+  return (await db()).get("state", key);
+}
+export async function runtimeSave(key: string, value: unknown) {
+  await (await db()).put("state", value, key);
+}

@@ -62,7 +62,7 @@ jobs:
         env:
           LIVE_TESTS: "1"
           E2E_BASE_URL: https://totoro0419.github.io/musicpleasure/
-        run: npx playwright test tests/live.spec.ts --project desktop --retries=0
+        run: npx playwright test tests/live.spec.ts --project desktop --project android-tablet --retries=0 --workers=1
       - uses: actions/upload-artifact@v4
         if: always()
         with:

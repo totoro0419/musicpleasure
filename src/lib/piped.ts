@@ -7,6 +7,7 @@ import type {
 } from "../types";
 import { healthRead, healthSave } from "./storage";
 import { fromItem } from "./model";
+import { PlaybackError, classify, reliability } from "./reliability";
 const seed = [
   "https://pipedapi.ducks.party",
   "https://api.piped.private.coffee",
@@ -90,15 +91,27 @@ export class PipedClient {
     this.record();
     return clean;
   }
-  ranked(includeCooling = false) {
+  ranked(includeCooling = false, capability: "api" | "audio" = "api") {
     return [...this.health]
-      .filter((h) => includeCooling || h.cooldown < Date.now())
+      .filter(
+        (h) =>
+          includeCooling ||
+          (h.cooldown < Date.now() &&
+            (capability !== "audio" || (h.audioCooldown || 0) < Date.now())),
+      )
       .sort((a, b) => {
         const score = (h: InstanceHealth) =>
           h.latency +
-          h.failure * 400 -
-          h.success * 60 -
-          h.audioSuccess * 400 -
+          Math.min(15, h.failure) * 400 -
+          Math.min(20, h.success) * 60 -
+          (capability === "audio"
+            ? 4000 *
+              ((h.audioSuccess + 1) /
+                (h.audioSuccess + (h.audioFailure || 0) + 2))
+            : 0) +
+          (capability === "audio"
+            ? Math.min(3000, (h.audioFailure || 0) * 150)
+            : 0) -
           (h.url === this.preferred ? 5000 : 0);
         return score(a) - score(b);
       });
@@ -121,9 +134,40 @@ export class PipedClient {
     const h = this.health.find((h) => h.url === url);
     if (h) {
       h.audioSuccess++;
+      h.lastAudioSuccess = Date.now();
+      h.audioCooldown = 0;
+      h.lastAudioError = "";
       h.cooldown = 0;
       this.record();
     }
+  }
+  audioResult(
+    url: string,
+    result: "prepared" | "failure",
+    error?: PlaybackError,
+  ) {
+    const h = this.health.find((h) => h.url === url);
+    if (!h) return;
+    if (result === "prepared") h.audioPrepared = (h.audioPrepared || 0) + 1;
+    else if (
+      error &&
+      !["cancelled", "autoplay_blocked", "unsupported_format"].includes(
+        error.kind,
+      )
+    ) {
+      h.audioFailure = (h.audioFailure || 0) + 1;
+      h.lastAudioError = error.message;
+      if (
+        [
+          "network_or_cors",
+          "timeout",
+          "api_unavailable",
+          "invalid_response",
+        ].includes(error.kind)
+      )
+        h.audioCooldown = Date.now() + 30000;
+    }
+    this.record();
   }
   async at<T>(
     url: string,
@@ -144,20 +188,35 @@ export class PipedClient {
       try {
         value = JSON.parse(body);
       } catch {
-        throw Error(`HTTP ${r.status}: JSONではない応答`);
+        throw new PlaybackError(
+          "invalid_response",
+          `HTTP ${r.status}: JSONではない応答`,
+          "api",
+          url,
+          r.status,
+        );
       }
-      if (!r.ok || value?.error) {
+      if (!r.ok || value?.error || (value?.exception && value?.message)) {
         const detail = String(
           value?.error || value?.message || `HTTP ${r.status}`,
         );
-        throw Error(
-          /SignInConfirmNotBot|LOGIN_REQUIRED|not a bot/.test(detail)
-            ? `HTTP ${r.status}: 配信元がこの接続先の動画取得を拒否しました`
-            : detail.slice(0, 240),
+        const rejected = /SignInConfirmNotBot|LOGIN_REQUIRED|not a bot/.test(
+          detail,
+        );
+        throw new PlaybackError(
+          rejected
+            ? "upstream_rejected"
+            : r.status === 404
+              ? "no_stream"
+              : "api_unavailable",
+          rejected
+            ? "配信元がこの接続先の動画取得を拒否しました"
+            : `HTTP ${r.status}: ${detail.slice(0, 160)}`,
+          path.startsWith("/streams/") ? "streams" : "api",
+          url,
+          r.status,
         );
       }
-      if (value?.error || (value?.message && value?.exception))
-        throw Error(value.error || value.message);
       const h = this.health.find((h) => h.url === url);
       if (h) {
         h.success++;
@@ -169,8 +228,27 @@ export class PipedClient {
       }
       return value;
     } catch (e) {
-      if (!signal?.aborted) this.failure(url, e);
-      throw e;
+      const error = classify(
+        e,
+        path.startsWith("/streams/") ? "streams" : "api",
+        url,
+      );
+      if (!signal?.aborted) {
+        if (error.kind !== "upstream_rejected" && error.kind !== "no_stream")
+          this.failure(url, error);
+        reliability.record({
+          trackId: path.startsWith("/streams/")
+            ? path.split("/")[2]
+            : undefined,
+          instance: url,
+          stage: error.stage,
+          outcome: "failure",
+          kind: error.kind,
+          status: error.status,
+          detail: error.message,
+        });
+      }
+      throw error;
     }
   }
   async request<T>(

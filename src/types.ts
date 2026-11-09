@@ -109,4 +109,9 @@ export interface InstanceHealth {
   lastError: string;
   audioSuccess: number;
   lastChecked: number;
+  audioFailure?: number;
+  audioPrepared?: number;
+  lastAudioSuccess?: number;
+  lastAudioError?: string;
+  audioCooldown?: number;
 }

@@ -19,7 +19,8 @@ class FakeAudio extends EventTarget {
   pause() {
     this.paused = true;
   }
-  load() {}
+  readyState=0;
+  load() {this.readyState=this.src?2:0;if(this.src)this.dispatchEvent(new Event("loadeddata"));}
   removeAttribute(name: string) {
     if (name === "src") this.src = "";
   }
