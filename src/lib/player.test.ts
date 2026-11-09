@@ -159,4 +159,17 @@ describe("playback concurrency and recovery (simulated media)", () => {
     expect(p.audio.paused).toBe(false);
     expect(p.state.status).toBe("playing");
   });
+  it("respects data saver for optional prefetch without disabling required radio checks", async () => {
+    const { p } = await setup();
+    vi.stubGlobal("navigator", { connection: { saveData: true } });
+    const prepare = vi.spyOn(p.resolver, "prepare").mockResolvedValue({
+      id: "M7lc1UVf-VE", instance: "https://api.test", info: info("Radio"),
+      stream: info("Radio").audioStreams[0], at: Date.now(), checked: "decoded",
+    });
+    await p.prefetch("M7lc1UVf-VE", emptyData().settings);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(await p.prefetch("M7lc1UVf-VE", emptyData().settings, undefined, true))
+      .toMatchObject({ checked: "decoded" });
+    expect(prepare).toHaveBeenCalledTimes(1);
+  });
 });

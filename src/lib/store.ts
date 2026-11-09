@@ -175,7 +175,11 @@ export const store = {
   toggle() {
     if (playback.status === "playing" || playback.status === "loading")
       player.pause();
-    else if (playback.trackId === data.queue[data.current] && playback.engine)
+    else if (
+      ["paused", "blocked"].includes(playback.status) &&
+      playback.trackId === data.queue[data.current] &&
+      playback.engine
+    )
       void player.play();
     else void this.playCurrent(data.position);
   },
@@ -292,7 +296,7 @@ export const store = {
           const results = await Promise.all(
             pool.slice(i, i + 2).map(async (t) => ({
               t,
-              prepared: await player.prefetch(t.id, data.settings, signal),
+              prepared: await player.prefetch(t.id, data.settings, signal, true),
             })),
           );
           if (signal.aborted || epoch !== radioEpoch || !data.radio) return;
