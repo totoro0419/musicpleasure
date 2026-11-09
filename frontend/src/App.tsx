@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useId } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -170,6 +170,7 @@ function Modal({
   wide?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const headingId = useId();
   useEffect(() => {
     const old = document.activeElement as HTMLElement;
     const d = ref.current!;
@@ -186,6 +187,7 @@ function Modal({
   return (
     <dialog
       ref={ref}
+      aria-labelledby={headingId}
       className={wide ? "wide" : ""}
       onCancel={(e) => {
         e.preventDefault();
@@ -196,7 +198,7 @@ function Modal({
       }}
     >
       <div className="dialog-heading">
-        <h2>{title}</h2>
+        <h2 id={headingId}>{title}</h2>
         <IconButton icon={X} label="閉じる" onClick={onClose} />
       </div>
       {children}

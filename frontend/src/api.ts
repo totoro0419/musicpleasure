@@ -23,7 +23,11 @@ export async function api<T>(
       const v = await r.json();
       msg = typeof v.detail === "string" ? v.detail : msg;
     } catch {
-      /* non-JSON hosting fallback */
+      if (!base() && [404, 500].includes(r.status)) {
+        msg = path.startsWith("/search")
+          ? "検索サーバーが未接続です。接続設定が完了するまでYouTube検索は利用できません"
+          : "バックエンドが未接続です。設定からAPI URLを指定してください";
+      }
     }
     throw new Error(msg);
   }
