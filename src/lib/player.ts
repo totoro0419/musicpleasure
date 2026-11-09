@@ -476,8 +476,10 @@ export class MusicPlayer {
     id: string,
     settings: Settings,
     signal?: AbortSignal,
+    required = false,
   ): Promise<PreparedAudio | undefined> {
     if (
+      !required &&
       (navigator as Navigator & { connection?: { saveData: boolean } })
         .connection?.saveData
     )
