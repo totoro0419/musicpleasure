@@ -302,6 +302,7 @@ export default function App() {
         ai: boolean;
         ffmpeg: boolean;
         downloader: boolean;
+        capabilities?: { search: boolean; downloads: boolean; ai: boolean };
         authentication: boolean;
       }>("/health");
       if (health.authentication) await api("/jobs");
@@ -625,7 +626,11 @@ export default function App() {
             onClick={() => setSettings(true)}
           >
             <span />
-            {health.data ? "バックエンド接続済み" : "ローカルモード"}
+            {health.data
+              ? health.data.capabilities?.downloads === false
+                ? "検索接続済み"
+                : "バックエンド接続済み"
+              : "ローカルモード"}
           </button>
           {!install.installed && (
             <button
@@ -2126,6 +2131,7 @@ function SettingsPanel({
     ai: boolean;
     ffmpeg: boolean;
     downloader: boolean;
+    capabilities?: { search: boolean; downloads: boolean; ai: boolean };
   };
   healthError?: string;
   notify: Notify;
@@ -2141,11 +2147,17 @@ function SettingsPanel({
         <span className={health ? "status-dot connected" : "status-dot"} />
         <div>
           <strong>
-            {health ? "バックエンド接続済み" : "バックエンド未接続"}
+            {health
+              ? health.capabilities?.downloads === false
+                ? "YouTube検索に接続済み"
+                : "バックエンド接続済み"
+              : "バックエンド未接続"}
           </strong>
           <small>
             {health
-              ? "YouTube検索・音声取得を利用できます"
+              ? health.capabilities?.downloads === false
+                ? "YouTube検索を利用できます。音声取得にはフルバックエンドの接続が必要です"
+                : "YouTube検索・音声取得を利用できます"
               : "保存済みMP3・ライブラリ・コピペ解析を利用できます"}
           </small>
         </div>

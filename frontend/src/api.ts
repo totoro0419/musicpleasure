@@ -3,16 +3,30 @@ import type { Track, DownloadJob, Proposal } from "./types";
 export function base() {
   return useStore.getState().settings.apiUrl.replace(/\/$/, "");
 }
+const PUBLIC_SEARCH_API =
+  "https://musicpleasure-search-ibuki.ibukioike2009.chatgpt.site";
+function endpoint(path: string) {
+  const configured = base();
+  if (configured || globalThis.location?.hostname !== "totoro0419.github.io")
+    return configured;
+  if (/^\/(health|search|parse-url|playlists)(?:[/?]|$)/.test(path))
+    return PUBLIC_SEARCH_API;
+  throw new Error(
+    "音声の取得・AI機能には、設定からフルバックエンドを接続してください",
+  );
+}
 export async function api<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
   const { token } = useStore.getState().settings;
-  const r = await fetch(base() + "/api" + path, {
+  const origin = endpoint(path);
+  const publicSearch = origin === PUBLIC_SEARCH_API && !base();
+  const r = await fetch(origin + "/api" + path, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(token && !publicSearch ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
     signal: options.signal || AbortSignal.timeout(65000),
