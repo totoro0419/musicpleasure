@@ -153,7 +153,6 @@ export function TrackList({
                 <div className="tracktext">
                   <button
                     className="textbutton title"
-                    aria-label={`${t.title}を再生`}
                     onClick={() => playTrack(t, row.index)}
                   >
                     {t.title}

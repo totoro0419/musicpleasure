@@ -2642,7 +2642,7 @@ html[data-theme="light"] .shortcut-import { color:#5c479d; }
  .topbar-search { min-height:42px; width:44px; padding:9px; margin-right:0; justify-content:center; }
  .topbar-search span { display:none; }
  .topbar-actions { gap:1px; }
- .topbar-actions button[aria-label="元に戻す"],.topbar-actions button[aria-label="やり直す"] { display:none; }
+ .topbar-actions button[aria-label="元に戻す"],.topbar-actions button[aria-label="やり直す"] { display:inline-flex; }
  .content { padding:19px 14px 30px; }
  .home-welcome { padding:25px 21px; border-radius:19px; }
  .home-kicker { font-size:11px; }
