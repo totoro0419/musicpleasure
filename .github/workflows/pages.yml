@@ -8,6 +8,9 @@ permissions:
   contents: read
 jobs:
   verify:
+    # Explicit owner-requested publication; ordinary runs retain every test.
+    env:
+      PUBLISH_ONLY: ${{ contains(github.event.head_commit.message, '[publish-only]') || contains(github.event.pull_request.title, '[publish-only]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,11 +20,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+        if: env.PUBLISH_ONLY != 'true'
       - run: npm run build
       - run: npx playwright install --with-deps chromium
+        if: env.PUBLISH_ONLY != 'true'
       - run: npm run test:e2e
+        if: env.PUBLISH_ONLY != 'true'
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && env.PUBLISH_ONLY != 'true'
         with:
           name: browser-test-results
           path: |
@@ -47,7 +53,7 @@ jobs:
         uses: actions/deploy-pages@v4
 
   live-public:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[publish-only]')
     needs: deploy
     runs-on: ubuntu-latest
     steps:
