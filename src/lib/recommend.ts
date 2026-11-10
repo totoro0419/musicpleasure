@@ -1,6 +1,6 @@
 import type { Data, Track, RadioMode } from "../types";
 import { fromItem, unique } from "./model";
-import { piped } from "./piped";
+import { invidious } from "./invidious";
 import { reliability } from "./reliability";
 export const isCover = (s: string) =>
   /歌ってみた|cover|カバー|歌いました|歌わせて/i.test(s);
@@ -88,7 +88,7 @@ export async function recommend(seed: Track, data: Data, signal?: AbortSignal) {
   const pool: Track[] = [];
   let errors = 0;
   try {
-    const info = await piped.streams(seed.id, signal);
+    const info = await invidious.streams(seed.id, signal);
     pool.push(
       ...info.relatedStreams.map(fromItem).filter((t): t is Track => !!t),
     );
@@ -109,9 +109,9 @@ export async function recommend(seed: Track, data: Data, signal?: AbortSignal) {
         : `${core} music`;
   try {
     if (mode === "channel" && seed.uploaderUrl)
-      pool.push(...(await piped.channel(seed.uploaderUrl, signal)));
+      pool.push(...(await invidious.channel(seed.uploaderUrl, signal)));
     else {
-      const r = await piped.search(query, undefined, signal);
+      const r = await invidious.search(query, undefined, signal);
       pool.push(...r.items.map(fromItem).filter((t): t is Track => !!t));
     }
   } catch {

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Download, Upload, RefreshCw, ShieldCheck, Server } from "lucide-react";
 import { store, useStore } from "../lib/store";
 import { validateBackup } from "../lib/model";
-import { piped } from "../lib/piped";
+import { invidious } from "../lib/invidious";
 import { player } from "../lib/player";
 import { reliability } from "../lib/reliability";
 import type { Data } from "../types";
@@ -44,7 +44,7 @@ export function Settings({
         <section className="panel">
           <h2>再生</h2>
           <p className="muted">
-            Piped音声再生専用。再生できない場合は別のPiped接続先へ切り替えます。
+            Invidious音声再生専用。再生できない場合は別のInvidious接続先へ切り替えます。
           </p>
           <label>
             音声品質
@@ -252,14 +252,14 @@ export function Settings({
         <div className="section-heading">
           <h2>
             <Server size={20} />
-            Pipedの接続状態
+            Invidiousの接続状態
           </h2>
           <button
             disabled={checking}
             onClick={async () => {
               setChecking(true);
               try {
-                await piped.check();
+                await invidious.check();
               } finally {
                 setChecking(false);
               }
@@ -279,7 +279,7 @@ export function Settings({
             onChange={(e) => store.settings({ instance: e.target.value })}
           >
             <option value="">自動選択</option>
-            {piped.health.map((h) => (
+            {invidious.health.map((h) => (
               <option key={h.url} value={h.url}>
                 {new URL(h.url).hostname}
               </option>
@@ -287,7 +287,7 @@ export function Settings({
           </select>
         </label>
         <div className="instance-list">
-          {piped.health.map((h) => (
+          {invidious.health.map((h) => (
             <div className="instance" key={h.url}>
               <div>
                 <b>{new URL(h.url).hostname}</b>
@@ -352,7 +352,7 @@ export function Settings({
           <summary>任意の接続先を追加</summary>
           <div className="actions">
             <input
-              aria-label="Piped API URL"
+              aria-label="Invidious API URL"
               value={custom}
               onChange={(e) => setCustom(e.target.value)}
               placeholder="https://..."
@@ -360,7 +360,7 @@ export function Settings({
             <button
               onClick={() => {
                 try {
-                  piped.add(custom);
+                  invidious.add(custom);
                   setCustom("");
                 } catch (e) {
                   store.notify(String(e));
@@ -405,7 +405,7 @@ export function Settings({
                 try {
                   await player.load(track, {
                     ...data.settings,
-                    engine: "piped",
+                    engine: "invidious",
                   });
                 } finally {
                   setAudioChecking(false);

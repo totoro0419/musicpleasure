@@ -29,7 +29,7 @@ export type RadioMode =
   "favorites" | "balance" | "discovery" | "covers" | "channel" | "versions";
 export interface Settings {
   quality: "balanced" | "high" | "data";
-  engine: "piped";
+  engine: "invidious";
   instance: string;
   radioMode: RadioMode;
   discovery: number;
@@ -62,7 +62,7 @@ export interface Data {
   searches: string[];
   importJob: ImportItem[];
 }
-export interface PipedItem {
+export interface InvidiousItem {
   url?: string;
   type?: string;
   title?: string;
@@ -92,10 +92,10 @@ export interface StreamInfo {
   duration: number;
   audioStreams: AudioStream[];
   videoStreams?: (AudioStream & { videoOnly: boolean })[];
-  relatedStreams: PipedItem[];
+  relatedStreams: InvidiousItem[];
 }
 export interface SearchPage {
-  items: PipedItem[];
+  items: InvidiousItem[];
   nextpage?: string | null;
   corrected?: boolean;
   suggestion?: string;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Search as SearchIcon, Link, RefreshCw } from "lucide-react";
-import type { Track, PipedItem } from "../types";
-import { piped } from "../lib/piped";
+import type { Track, InvidiousItem } from "../types";
+import { invidious } from "../lib/invidious";
 import { fromItem, videoId, placeholder, playlistId } from "../lib/model";
 import { store, useStore } from "../lib/store";
 import { isCover } from "../lib/recommend";
@@ -10,7 +10,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
   const { data } = useStore();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Track[]>([]);
-  const [channels, setChannels] = useState<PipedItem[]>([]);
+  const [channels, setChannels] = useState<InvidiousItem[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -28,7 +28,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
     const c = new AbortController();
     const timer = setTimeout(
       () =>
-        void piped
+        void invidious
           .suggestions(query, c.signal)
           .then(setSuggestions)
           .catch(() => {}),
@@ -66,7 +66,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
       if (id) {
         let track = placeholder(id);
         try {
-          const info = await piped.streams(id, signal);
+          const info = await invidious.streams(id, signal);
           track = {
             ...track,
             title: info.title,
@@ -78,7 +78,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
         } catch {
           if (signal.aborted) return;
           setError(
-            "Pipedから動画の詳細を取得できません。再生時に別のPiped接続先で再取得します。",
+            "Invidiousから動画の詳細を取得できません。再生時に別のInvidious接続先で再取得します。",
           );
         }
         if (token !== request.current) return;
@@ -86,7 +86,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
         setResults([track]);
       } else {
         const sq = filter === "covers" ? `${q} 歌ってみた cover` : q;
-        const page = await piped.search(
+        const page = await invidious.search(
           sq,
           more ? nextpage : undefined,
           signal,
@@ -265,7 +265,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
             <button
               onClick={async () => {
                 try {
-                  const tracks = await piped.channel(c.url || "");
+                  const tracks = await invidious.channel(c.url || "");
                   store.addTracks(tracks);
                   setResults(tracks);
                 } catch (e) {

@@ -9,7 +9,7 @@ it("retrying an errored player goes through queue traversal and reaches the foll
   vi.stubGlobal("navigator", {});
   const first = placeholder("M7lc1UVf-VE"), next = placeholder("dQw4w9WgXcQ");
   const playback = {
-    status: "error", engine: "piped", position: 0, duration: 100,
+    status: "error", engine: "invidious", position: 0, duration: 100,
     message: "Failed", trackId: first.id, instance: "https://api.test",
   };
   const fake: any = {
@@ -25,7 +25,7 @@ it("retrying an errored player goes through queue traversal and reaches the foll
   };
   vi.doMock("./player", () => ({ player: fake }));
   vi.doMock("./storage", () => ({ readData: async () => emptyData(), saveData: vi.fn(async () => {}) }));
-  vi.doMock("./piped", () => ({ piped: { init: vi.fn(), onHealth: () => {}, preferred: "" } }));
+  vi.doMock("./invidious", () => ({ invidious: { init: vi.fn(), onHealth: () => {}, preferred: "" } }));
   vi.doMock("./reliability", () => ({
     reliability: { init: vi.fn(), isExcluded: () => false, record: vi.fn() },
     classify: (e: unknown) => e,

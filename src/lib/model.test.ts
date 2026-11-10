@@ -12,7 +12,7 @@ import {
 } from "./model";
 import { parseList, matchScore, planCommand } from "./importer";
 import { rankCandidates } from "./recommend";
-import { compatibleStreams } from "./piped";
+import { compatibleStreams } from "./invidious";
 import "fake-indexeddb/auto";
 import { saveData, readData } from "./storage";
 const a = {
@@ -177,7 +177,7 @@ describe("batch import and command preview", () => {
     ];
     expect(() => planCommand("適当に削除", "p", d)).toThrow();
   });
-  it("normalizes actual Piped search items", () =>
+  it("normalizes actual Invidious search items", () =>
     expect(
       fromItem({
         url: "/watch?v=" + b.id,

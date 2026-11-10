@@ -1,8 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
-import tracks from "./fixtures/piped-tracks.json" with { type: "json" };
+import tracks from "./fixtures/invidious-tracks.json" with { type: "json" };
 import { emptyData, newPlaylist } from "../src/lib/model";
-test("ten real YouTube posts: Piped media, failure skips and radio (no mocks)", async ({
+test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks)", async ({
   page,
 }, info) => {
   test.skip(
@@ -215,7 +215,7 @@ test("ten real YouTube posts: Piped media, failure skips and radio (no mocks)", 
     errors.push(String(e));
   } finally {
     await mkdir("test-results", { recursive: true });
-    const name = "piped-live-" + info.project.name;
+    const name = "invidious-live-" + info.project.name;
     await writeFile(
       `test-results/${name}.json`,
       JSON.stringify(report, null, 2),

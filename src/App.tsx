@@ -217,7 +217,7 @@ function NowPlaying({ onAdd }: { onAdd: (ids: string[]) => void }) {
           <section className="nowplaying">
             <img className="album" src={t.thumbnail} alt="" />
             <div>
-              <span className="eyebrow">PIPED AUDIO</span>
+              <span className="eyebrow">INVIDIOUS AUDIO</span>
               <h2>{t.title}</h2>
               <p>{t.uploader}</p>
               <p className="muted">
@@ -743,7 +743,7 @@ export default function App() {
             }}
           />
           <span className="engine-badge">
-            {playback.engine === "piped" ? "Piped" : "AUDIO"}
+            {playback.engine === "invidious" ? "Invidious" : "AUDIO"}
           </span>
         </div>
         {(playback.message ||

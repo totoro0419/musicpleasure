@@ -16,7 +16,7 @@ export const emptyData = (): Data => ({
   radio: false,
   settings: {
     quality: "balanced",
-    engine: "piped",
+    engine: "invidious",
     instance: "",
     radioMode: "balance",
     discovery: 55,
@@ -78,7 +78,7 @@ export const newPlaylist = (name: string, tracks: string[] = []): Playlist => ({
   favorite: false,
   created: Date.now(),
 });
-export function fromItem(item: import("../types").PipedItem): Track | null {
+export function fromItem(item: import("../types").InvidiousItem): Track | null {
   const id = videoId(item.url || "");
   return id
     ? {
@@ -192,9 +192,10 @@ export function validateBackup(raw: unknown): Data {
     ...d.settings,
     weights: { ...base.settings.weights, ...d.settings?.weights },
   };
-  settings.engine = "piped";
+  const migratingProvider = d.settings?.engine !== "invidious";
+  settings.engine = "invidious";
   if (
-    settings.engine !== "piped" ||
+    settings.engine !== "invidious" ||
     !["balanced", "high", "data"].includes(settings.quality) ||
     ![
       "favorites",
@@ -215,7 +216,7 @@ export function validateBackup(raw: unknown): Data {
     throw Error("設定データが破損しています");
   settings.instance =
     typeof settings.instance === "string" &&
-    settings.instance.startsWith("https://")
+    !migratingProvider && settings.instance.startsWith("https://")
       ? settings.instance
       : "";
   const listening: Data["listening"] = {};
