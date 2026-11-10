@@ -241,12 +241,12 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
           <h2>
             検索結果 <small>{visible.length}曲</small>
           </h2>
-          <button onClick={() => store.playList(visible.map((t) => t.id))}>
+          <button onClick={() => store.playList(visible.map((t) => t.id), 0, true)}>
             すべて再生
           </button>
         </div>
       )}
-      <TrackList tracks={visible} onAdd={onAdd} selectable />
+      <TrackList tracks={visible} onAdd={onAdd} selectable singlePlay />
       {channels.map((c, i) => (
         <div key={i} className="panel">
           <b>{c.name}</b>
