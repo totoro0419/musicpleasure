@@ -395,7 +395,6 @@ const traversal = new QueueTraversal({
       };
       return {
         ...d,
-        history: unique([t.id, ...d.history]).slice(0, 1000),
         listening: { ...d.listening, [t.id]: { ...stat, last: Date.now() } },
         position,
       };
@@ -508,6 +507,7 @@ player.onListen = (seconds) => {
   if (count) counted = true;
   data = {
     ...data,
+    history: data.history[0] === id ? data.history : unique([id, ...data.history]).slice(0, 1000),
     listening: {
       ...data.listening,
       [id]: {

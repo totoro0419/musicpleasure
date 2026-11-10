@@ -132,10 +132,12 @@ function NowPlaying({ onAdd }: { onAdd: (ids: string[]) => void }) {
                 {data.radio ? "ON" : "OFF"}
               </p>
               <div className="actions">
+                <button onClick={() => store.previous()}><SkipBack size={18} />前の曲</button>
                 <button className="primary" onClick={() => store.toggle()}>
                   {playback.status === "playing" ? <Pause /> : <Play />}
                   {playback.status === "playing" ? "一時停止" : "再生"}
                 </button>
+                <button onClick={() => store.next()}><SkipForward size={18} />次の曲</button>
                 <button onClick={() => void store.startRadio(t)}>
                   <RadioIcon size={18} />
                   この曲からラジオ
@@ -169,6 +171,9 @@ function NowPlaying({ onAdd }: { onAdd: (ids: string[]) => void }) {
                       : "1曲"}
                 </button>
               </div>
+              <label>再生位置 · {time(playback.position)} / {time(playback.duration || t.duration)}
+                <input aria-label="再生画面の再生位置" type="range" min="0" max={playback.duration || t.duration || 1} step="1" value={Math.min(playback.position, playback.duration || t.duration || 1)} onChange={e => player.seek(Number(e.target.value))} />
+              </label>
               <label className="full-volume">
                 音量
                 <input

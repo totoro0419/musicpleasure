@@ -57,8 +57,9 @@ test("offline saved audio survives reload and plays three distinct files through
  await info.attach("offline-actual-playback",{body:JSON.stringify({network:"context.setOffline(true), offline shell reload",originalTones:true,distinct:observed,elapsedMs:Date.now()-start,starts:diag.starts},null,2),contentType:"application/json"});
  // Repeat/shuffle/seek operate on the same persisted audio while the network is still disabled.
  await page.goto("./#local");await page.getByRole("button",{name:"保存曲を連続再生",exact:true}).click();await advances(page);
- await page.getByLabel("シャッフル",{exact:true}).click();
- await page.getByRole("button",{name:"リピート：off",exact:true}).click();await page.getByRole("button",{name:"リピート：all",exact:true}).click();
+ await page.goto("./#playing");
+ await page.locator("main").getByRole("button",{name:"シャッフル OFF",exact:true}).click();
+ await page.locator("main").getByRole("button",{name:"リピート なし",exact:true}).click();await page.locator("main").getByRole("button",{name:"リピート 全曲",exact:true}).click();
  const repeated=await page.locator(".mini-track").getAttribute("data-track-id");
  await page.goto("./#settings");
  const beforeRepeat=JSON.parse((await page.getByTestId("playback-diagnostics").textContent())||"{}").starts.filter((s:any)=>s.id===repeated).length;

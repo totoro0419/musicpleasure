@@ -14,6 +14,8 @@ class FakeAudio extends EventTarget {
     if (this.src.includes("broken")) return Promise.reject(Error("403"));
     this.paused = false;
     this.dispatchEvent(new Event("playing"));
+    this.currentTime += 0.1;
+    this.dispatchEvent(new Event("timeupdate"));
     return Promise.resolve();
   }
   pause() {
@@ -172,4 +174,16 @@ describe("playback concurrency and recovery (simulated media)", () => {
       .toMatchObject({ checked: "decoded" });
     expect(prepare).toHaveBeenCalledTimes(1);
   });
+});
+it("does not report a decoded but stalled source as a successful load", async () => {
+ class StalledAudio extends FakeAudio {
+  play() { this.paused=false; this.dispatchEvent(new Event("playing")); return Promise.resolve(); }
+ }
+ vi.stubGlobal("Audio", StalledAudio);
+ const {p,invidious}=await setup();
+ vi.spyOn(invidious,"at").mockResolvedValue(info("Stalled"));
+ const loading=p.load(placeholder("M7lc1UVf-VE"),emptyData().settings);
+ await vi.advanceTimersByTimeAsync(13000);
+ expect((await loading).status).toBe("failed");
+ expect(invidious.health[0].audioSuccess).toBe(0);
 });

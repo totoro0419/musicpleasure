@@ -388,34 +388,43 @@ export class MusicPlayer {
     signal: AbortSignal,
   ) {
     if (prepared.buffer) { this.adopt(prepared.buffer); prepared.buffer = undefined; }
+    const audio = this.audio;
     return new Promise<void>((resolve, reject) => {
       let settled = false;
       const done = (error?: unknown) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        this.audio.removeEventListener("loadedmetadata", metadata);
-        this.audio.removeEventListener("error", failure);
+        clearInterval(progressTimer);
+        audio.removeEventListener("timeupdate", progressed);
+        audio.removeEventListener("loadedmetadata", metadata);
+        audio.removeEventListener("error", failure);
         signal.removeEventListener("abort", cancel);
         error ? reject(error) : resolve();
       };
+      let baseline = position;
+      const progressed = () => {
+        if (!audio.paused && !audio.seeking && audio.currentTime > baseline + 0.02) done();
+      };
+      const progressTimer = setInterval(progressed, 50);
       const metadata = () => {
-        if (Number.isFinite(this.audio.duration)) {
-          this.set({ duration: this.audio.duration });
+        if (Number.isFinite(audio.duration)) {
+          this.set({ duration: audio.duration });
           if (position > 0)
-            this.audio.currentTime = Math.min(
+            audio.currentTime = Math.min(
               position,
-              Math.max(0, this.audio.duration - 0.2),
+              Math.max(0, audio.duration - 0.2),
             );
+          baseline = audio.currentTime;
         }
       };
       const failure = () =>
         done(
           new PlaybackError(
-            this.audio.error?.code === 3
+            audio.error?.code === 3
               ? "unsupported_format"
               : "network_or_cors",
-            `音声再生に失敗しました（MediaError ${this.audio.error?.code || 0}）`,
+            `音声再生に失敗しました（MediaError ${audio.error?.code || 0}）`,
             "play",
             prepared.instance,
           ),
@@ -433,8 +442,9 @@ export class MusicPlayer {
           ),
         6000,
       );
-      this.audio.addEventListener("loadedmetadata", metadata);
-      this.audio.addEventListener("error", failure);
+      audio.addEventListener("timeupdate", progressed);
+      audio.addEventListener("loadedmetadata", metadata);
+      audio.addEventListener("error", failure);
       signal.addEventListener("abort", cancel, { once: true });
       if (signal.aborted) {
         cancel();
@@ -446,9 +456,9 @@ export class MusicPlayer {
       this.audioConfirmed = false;
       this.stallAt = 0;
       this.started = false;
-      if (this.audio.src !== prepared.stream.url) this.audio.src = prepared.stream.url;
-      if (this.audio.readyState >= 1) metadata();
-      void this.audio.play().then(() => done(), done);
+      if (audio.src !== prepared.stream.url) audio.src = prepared.stream.url;
+      if (audio.readyState >= 1) metadata();
+      void audio.play().then(progressed, done);
     });
   }
   async play(): Promise<LoadResult> {

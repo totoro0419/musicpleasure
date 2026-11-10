@@ -2767,3 +2767,4 @@ html[data-theme="light"] .player-restore { background: var(--footer); color: var
 .local-import summary { cursor:pointer; padding:12px 0; }
 .local-import input[type=checkbox] { width:auto; }
 @media(max-width:700px) { .local-management { align-items:flex-start; flex-direction:column; } .local-management .actions { gap:8px; } .local-import .actions { flex-wrap:wrap; } }
+.local-art { display:grid; place-items:center; background:var(--panel); aspect-ratio:1; }
