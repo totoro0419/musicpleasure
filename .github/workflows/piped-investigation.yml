@@ -1,0 +1,56 @@
+name: Piped upstream investigation (no publish)
+on:
+  push:
+    branches: [investigation/piped-backend-proxy-20261110]
+permissions:
+  contents: read
+jobs:
+  real-piped:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runtime: official-6d0ad06
+            image: 1337kavin/piped@sha256:9dce3a6b3ef4f37c0f298032c1e9a603df9f37dc8492161219e9f3ce9d7d8638
+          - runtime: updated-newpipe-6cb36e98
+            image: ghcr.io/spendable1569/piped-backend@sha256:9d70a6e20c645a92cb51f84a408e6898b688bafd9dd3df2dcbc6aeb8c4246c18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install decoder
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: Start isolated Piped Backend and official audio proxy
+        env:
+          PIPED_IMAGE: ${{ matrix.image }}
+        run: |
+          cat > "$RUNNER_TEMP/piped.properties" <<'CONFIG'
+          PORT: 8080
+          PROXY_PART: http://127.0.0.1:8092
+          API_URL: http://127.0.0.1:8091
+          FRONTEND_URL: http://127.0.0.1:4173
+          hibernate.connection.url: jdbc:hsqldb:mem:memdb;sql.syntax_pgs=true
+          hibernate.connection.driver_class: org.hsqldb.jdbcDriver
+          hibernate.dialect: org.hibernate.dialect.HSQLDialect
+          hibernate.connection.username: piped
+          hibernate.connection.password: ephemeral-test-only
+          DISABLE_TIMERS: true
+          DISABLE_REGISTRATION: true
+          DISABLE_RYD: true
+          DISABLE_LBRY: true
+          DISABLE_PUBSUB: true
+          SENTRY_DSN:
+          CONFIG
+          docker run -d --name trial-proxy -p 127.0.0.1:8092:8080 1337kavin/piped-proxy@sha256:a49b74a2e085213d86729cfe3820ec54d22debffaeac977cf9982bd5ffafb2c8
+          docker run -d --name trial-backend -p 127.0.0.1:8091:8080 -e JAVA_TOOL_OPTIONS='-XX:ActiveProcessorCount=2 -Xmx512m' -v "$RUNNER_TEMP/piped.properties:/app/config.properties:ro" "$PIPED_IMAGE"
+      - name: Same ten posts through real Piped and its audio proxy
+        run: python3 diagnostics/piped_self_host.py --runtime '${{ matrix.runtime }}'
+      - name: Save sanitized results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: piped-investigation-${{ matrix.runtime }}
+          path: investigation-results/
+      - name: Stop disposable services
+        if: always()
+        run: docker rm -f trial-backend trial-proxy || true
