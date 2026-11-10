@@ -192,6 +192,11 @@ test("decoded test audio: pause, seek, ended auto-next, route changes and radio 
   await page.getByRole("button", { name: "検索", exact: true }).click();
   await page.getByRole("button", { name: "すべて再生", exact: true }).click();
   await expect(page.locator(".mini-track")).toContainText("再生中");
+  await page.getByRole("button", { name: "ミニプレーヤーを閉じる" }).click();
+  await expect(page.locator(".playerbar")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "ミニプレーヤーを再表示" })).toBeVisible();
+  await page.getByRole("button", { name: "ミニプレーヤーを再表示" }).click();
+  await expect(page.locator(".mini-track")).toContainText("再生中");
   await page.locator(".play-toggle").click();
   await expect(page.locator(".mini-track")).toContainText("一時停止");
   await page.locator(".play-toggle").click();
@@ -345,4 +350,28 @@ test("UI quality: mobile and tablet primary actions are usable touch targets", a
   const bounds = await search.boundingBox();
   expect(bounds).not.toBeNull();
   expect(bounds!.height).toBeGreaterThanOrEqual(44);
+});
+
+test("mini player can be dismissed and restored across routes and reloads", async ({ page }) => {
+  await mocks(page);
+  await page.goto("./");
+  await expect(page.locator(".playerbar")).toBeVisible();
+  await page.getByRole("button", { name: "ミニプレーヤーを閉じる" }).click();
+  await expect(page.locator(".playerbar")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "ミニプレーヤーを再表示" })).toBeVisible();
+  await goto(page, "search");
+  await expect(page.getByRole("heading", { name: "聴きたい曲を探す" })).toBeVisible();
+  await expect(page.locator(".playerbar")).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator(".playerbar")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "ミニプレーヤーを再表示" })).toBeVisible();
+  const box = await page.getByRole("button", { name: "ミニプレーヤーを再表示" }).boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.height).toBeGreaterThanOrEqual(44);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await page.getByRole("button", { name: "ミニプレーヤーを再表示" }).click();
+  await expect(page.locator(".playerbar")).toBeVisible();
+  await expect(page.getByRole("button", { name: "ミニプレーヤーを閉じる" })).toBeVisible();
+  await page.reload();
+  await expect(page.locator(".playerbar")).toBeVisible();
 });
