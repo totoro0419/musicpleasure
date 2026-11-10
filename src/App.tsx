@@ -207,6 +207,13 @@ export default function App() {
   const [install, setInstall] = useState<InstallPrompt | null>(null);
   const [update, setUpdate] = useState<ServiceWorker | null>(null);
   const [volume, setVolume] = useState(0.8);
+  const [miniPlayerHidden, setMiniPlayerHidden] = useState(() => {
+    try {
+      return window.localStorage.getItem("musicpleasure-mini-player-hidden") === "true";
+    } catch {
+      return false;
+    }
+  });
   const [addIds, setAddIds] = useState<string[]>([]);
   const [target, setTarget] = useState("");
   const [newName, setNewName] = useState("");
@@ -258,6 +265,16 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = data.settings.theme;
   }, [data.settings.theme]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "musicpleasure-mini-player-hidden",
+        String(miniPlayerHidden),
+      );
+    } catch {
+      // Storage can be blocked; the control still works in this session.
+    }
+  }, [miniPlayerHidden]);
   function onAdd(ids: string[]) {
     setAddIds(ids);
     setTarget(data.playlists[0]?.id || "");
@@ -299,7 +316,7 @@ export default function App() {
     ended: "再生終了",
   }[playback.status];
   return (
-    <div className="app">
+    <div className={`app${miniPlayerHidden ? " player-hidden" : ""}`}>
       <a className="skip-link" href="#main-content">
         本文へ移動
       </a>
@@ -515,7 +532,27 @@ export default function App() {
           MusicPleasure<span>あなたの毎日に、好きな音を。</span>
         </footer>
       </div>
+      {miniPlayerHidden ? (
+        <button
+          type="button"
+          className="player-restore"
+          aria-label="ミニプレーヤーを再表示"
+          onClick={() => setMiniPlayerHidden(false)}
+        >
+          <Music2 size={19} />
+          <span>プレーヤーを表示</span>
+        </button>
+      ) : (
       <section className="playerbar" aria-label="音楽プレーヤー">
+        <button
+          type="button"
+          className="player-dismiss"
+          aria-label="ミニプレーヤーを閉じる"
+          title="ミニプレーヤーを閉じる（再生は継続）"
+          onClick={() => setMiniPlayerHidden(true)}
+        >
+          <X size={18} />
+        </button>
         <a className="mini-track" href="#playing">
           {current ? (
             <img src={current.thumbnail} alt="" />
@@ -670,6 +707,7 @@ export default function App() {
           </div>
         )}
       </section>
+      )}
       <nav className="mobile-nav" aria-label="モバイルナビゲーション">
         {nav.slice(0, 4).map((n) => (
           <a

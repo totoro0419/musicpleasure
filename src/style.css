@@ -2699,3 +2699,61 @@ html[data-theme="light"] .shortcut-import { color:#5c479d; }
 @media (max-width:540px) {
   .search-help { font-size:12px; }
 }
+
+
+/* Dismissible player — visibility preference affects UI only, not the audio engine. */
+.playerbar { position: fixed; }
+.player-dismiss {
+  position: absolute;
+  right: 12px;
+  top: -44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px 12px 0 0;
+  background: var(--footer);
+  color: var(--text);
+  box-shadow: 0 -6px 22px #0003;
+  z-index: 1;
+}
+.player-dismiss:hover { background: var(--panel-hover); }
+.player-restore {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 46px;
+  padding: 10px 17px;
+  border: 1px solid #80dfe48a;
+  border-radius: 999px;
+  background: var(--footer);
+  color: var(--text);
+  box-shadow: 0 6px 25px #0006;
+  font-size: 13px;
+  font-weight: 700;
+  z-index: 82;
+}
+.player-restore:hover { background: var(--panel-hover); }
+.app.player-hidden { padding-bottom: 24px; }
+.app.player-hidden .sidebar { bottom: 0; }
+html[data-theme="light"] .player-dismiss,
+html[data-theme="light"] .player-restore { background: var(--footer); color: var(--text); }
+@media (max-width: 800px) {
+  .app.player-hidden {
+    padding-bottom: calc(86px + env(safe-area-inset-bottom));
+  }
+  .player-restore {
+    right: 14px;
+    bottom: calc(80px + env(safe-area-inset-bottom));
+  }
+  .player-dismiss { right: 12px; }
+}
