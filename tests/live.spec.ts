@@ -32,14 +32,32 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
     );
   };
   async function progresses() {
-    await expect(page.locator(".mini-track")).toContainText("再生中", {
-      timeout: 32000,
-    });
+    const mini = page.locator(".mini-track");
+    await expect(mini).toContainText("再生中", { timeout: 32000 });
     const slider = page.getByLabel("再生位置", { exact: true });
-    const start = Number(await slider.inputValue());
-    await expect
-      .poll(async () => Number(await slider.inputValue()), { timeout: 8000 })
-      .toBeGreaterThan(start + 1);
+    // A track switch resets the seek position (e.g. 214s -> 0s).
+    // Measure advancing audio *after* the reset instead of comparing against
+    // the prior track's position. Also ignore artificial seek jumps.
+    let previous = Number.NaN;
+    let accumulated = 0;
+    await expect.poll(async () => {
+      const status = await mini.innerText();
+      const position = Number(await slider.inputValue());
+      if (!status.includes("再生中") || !Number.isFinite(position)) {
+        previous = Number.NaN;
+        accumulated = 0;
+        return 0;
+      }
+      const step = position - previous;
+      if (!Number.isFinite(previous) || step < -0.5 || step > 3) {
+        previous = position;
+        accumulated = 0;
+        return 0;
+      }
+      if (step > 0) accumulated += step;
+      previous = position;
+      return accumulated;
+    }, { timeout: 12000, intervals: [250, 350, 500] }).toBeGreaterThan(1);
   }
   async function restore(queue: string[]) {
     await page.goto("./#settings");
