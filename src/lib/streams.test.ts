@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { StreamResolver } from "./streams";
 import { invidious } from "./invidious";
-import { PlaybackError } from "./reliability";
+import { PlaybackError, reliability } from "./reliability";
 import { emptyData } from "./model";
 const info = (urls = ["https://audio.test/a"]) => ({
   title: "Track",
@@ -92,7 +92,8 @@ describe("decoded-audio preparation", () => {
     expect((await r.prepare("id", emptyData().settings)).stream.url).toContain(
       "/ok",
     );
-    expect(invidious.health[0].lastAudioError).toContain("403");
+    expect(reliability.events.some((e) => e.trackId === "id" && e.detail.includes("403"))).toBe(true);
+    expect(invidious.health[0].audioCooldown).toBe(0);
   });
 
   it("recovers through Invidious local proxy after the normal audio URL fails", async () => {
