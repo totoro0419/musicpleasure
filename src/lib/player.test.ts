@@ -53,8 +53,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 async function setup() {
-  const { piped } = await import("./piped");
-  piped.health = [
+  const { invidious } = await import("./invidious");
+  invidious.health = [
     {
       url: "https://api.test",
       success: 0,
@@ -66,50 +66,50 @@ async function setup() {
       lastChecked: 0,
     },
   ];
-  vi.spyOn(piped, "record").mockImplementation(() => {});
+  vi.spyOn(invidious, "record").mockImplementation(() => {});
   const { MusicPlayer } = await import("./player");
-  return { piped, p: new MusicPlayer() };
+  return { invidious, p: new MusicPlayer() };
 }
 describe("playback concurrency and recovery (simulated media)", () => {
   it("starts only a playable stream and reports audio success", async () => {
-    const { p, piped } = await setup();
-    vi.spyOn(piped, "at").mockResolvedValue(info("First"));
+    const { p, invidious } = await setup();
+    vi.spyOn(invidious, "at").mockResolvedValue(info("First"));
     await p.load(placeholder("M7lc1UVf-VE"), {
       ...emptyData().settings,
-      engine: "piped",
+      engine: "invidious",
     });
     expect(p.state.status).toBe("playing");
     expect(p.audio.paused).toBe(false);
     p.audio.currentTime = 2;
     await vi.advanceTimersByTimeAsync(500);
-    expect(piped.health[0].audioSuccess).toBe(1);
+    expect(invidious.health[0].audioSuccess).toBe(1);
   });
   it("tries another compatible format after audio URL failure", async () => {
-    const { p, piped } = await setup();
-    vi.spyOn(piped, "at").mockResolvedValue(
+    const { p, invidious } = await setup();
+    vi.spyOn(invidious, "at").mockResolvedValue(
       info("First", ["https://audio.test/broken", "https://audio.test/valid"]),
     );
     await p.load(placeholder("M7lc1UVf-VE"), {
       ...emptyData().settings,
-      engine: "piped",
+      engine: "invidious",
     });
     expect(p.state.status).toBe("playing");
     expect(p.audio.src).toContain("valid");
   });
   it("never treats JSON success without audio as successful playback", async () => {
-    const { p, piped } = await setup();
-    vi.spyOn(piped, "at").mockResolvedValue(info("First", []));
+    const { p, invidious } = await setup();
+    vi.spyOn(invidious, "at").mockResolvedValue(info("First", []));
     await p.load(placeholder("M7lc1UVf-VE"), {
       ...emptyData().settings,
-      engine: "piped",
+      engine: "invidious",
     });
     expect(p.state.status).toBe("error");
-    expect(piped.health[0].audioSuccess).toBe(0);
+    expect(invidious.health[0].audioSuccess).toBe(0);
   });
   it("ignores a late response after stop", async () => {
-    const { p, piped } = await setup();
+    const { p, invidious } = await setup();
     let resolve!: (v: unknown) => void;
-    vi.spyOn(piped, "at").mockImplementation(
+    vi.spyOn(invidious, "at").mockImplementation(
       () => new Promise((r) => (resolve = r)),
     );
     const load = p.load(placeholder("M7lc1UVf-VE"), emptyData().settings);
@@ -121,10 +121,10 @@ describe("playback concurrency and recovery (simulated media)", () => {
     expect(p.audio.src).toBe("");
   });
   it("ignores the old track response during rapid next-track requests", async () => {
-    const { p, piped } = await setup();
+    const { p, invidious } = await setup();
     let first!: (v: unknown) => void;
     let count = 0;
-    vi.spyOn(piped, "at").mockImplementation(() =>
+    vi.spyOn(invidious, "at").mockImplementation(() =>
       ++count === 1
         ? new Promise((r) => (first = r))
         : (Promise.resolve(info("New")) as never),
@@ -137,8 +137,8 @@ describe("playback concurrency and recovery (simulated media)", () => {
     expect(p.state.status).toBe("playing");
   });
   it("consumes duplicate ended events only once", async () => {
-    const { p, piped } = await setup();
-    vi.spyOn(piped, "at").mockResolvedValue(info("First"));
+    const { p, invidious } = await setup();
+    vi.spyOn(invidious, "at").mockResolvedValue(info("First"));
     const ended = vi.fn();
     p.onEnded = ended;
     await p.load(placeholder("M7lc1UVf-VE"), emptyData().settings);
@@ -147,8 +147,8 @@ describe("playback concurrency and recovery (simulated media)", () => {
     expect(ended).toHaveBeenCalledTimes(1);
   });
   it("pause, resume and seek stay within the current engine", async () => {
-    const { p, piped } = await setup();
-    vi.spyOn(piped, "at").mockResolvedValue(info("First"));
+    const { p, invidious } = await setup();
+    vi.spyOn(invidious, "at").mockResolvedValue(info("First"));
     await p.load(placeholder("M7lc1UVf-VE"), emptyData().settings);
     p.seek(35);
     expect(p.audio.currentTime).toBe(35);

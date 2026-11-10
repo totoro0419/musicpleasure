@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { PlaybackError, Reliability, classify } from "./reliability";
-import { PipedClient } from "./piped";
+import { InvidiousClient } from "./invidious";
 afterEach(() => vi.restoreAllMocks());
 const health = (url: string) => ({
   url,
@@ -27,9 +27,9 @@ describe("truthful playback reliability", () => {
       classify(
         new PlaybackError("timeout", "slow", "probe"),
         "play",
-        "https://piped.test",
+        "https://invidious.test",
       ).instance,
-    ).toBe("https://piped.test");
+    ).toBe("https://invidious.test");
   });
   it("temporarily excludes failed videos, expires and permits manual reset", () => {
     const r = new Reliability();
@@ -52,7 +52,7 @@ describe("truthful playback reliability", () => {
     expect(Object.keys(r.excluded)).toHaveLength(0);
   });
   it("does not let search successes erase audio failures or count preparation as playback", () => {
-    const p = new PipedClient();
+    const p = new InvidiousClient();
     p.health = [health("https://api.test")];
     vi.spyOn(p, "record").mockImplementation(() => {});
     p.audioResult(
@@ -66,7 +66,7 @@ describe("truthful playback reliability", () => {
     expect(p.health[0].audioPrepared).toBe(1);
   });
   it("ranks real playback success above a faster search-only endpoint", () => {
-    const p = new PipedClient();
+    const p = new InvidiousClient();
     p.health = [
       {
         ...health("https://search.test"),

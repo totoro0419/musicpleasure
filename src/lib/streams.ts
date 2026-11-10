@@ -1,5 +1,5 @@
 import type { AudioStream, Settings, StreamInfo } from "../types";
-import { piped, compatibleStreams } from "./piped";
+import { invidious, compatibleStreams } from "./invidious";
 import { PlaybackError, classify, reliability } from "./reliability";
 export interface PreparedAudio {
   id: string;
@@ -144,10 +144,10 @@ export class StreamResolver {
       control.signal,
       AbortSignal.timeout(20000),
     ]);
-    piped.preferred = settings.instance;
-    const ordinary = piped.ranked(false, "audio");
+    invidious.preferred = settings.instance;
+    const ordinary = invidious.ranked(false, "audio");
     const candidates = (
-      ordinary.length ? ordinary : piped.ranked(true, "audio").slice(0, 3)
+      ordinary.length ? ordinary : invidious.ranked(true, "audio").slice(0, 3)
     ).slice(0, 18);
     const errors: PlaybackError[] = [];
     let metadataCount = 0;
@@ -156,7 +156,7 @@ export class StreamResolver {
         signal.throwIfAborted();
         const jobs = candidates.slice(offset, offset + 3).map((h, index) => ({
           index,
-          job: piped.at<StreamInfo>(h.url, `/streams/${id}`, signal, 4000).then(
+          job: invidious.at<StreamInfo>(h.url, `/api/v1/videos/${id}`, signal, 4000).then(
             (info) => ({ index, h, info, error: undefined }),
             (error) => ({
               index,
@@ -176,7 +176,7 @@ export class StreamResolver {
           const { h, info } = result;
           if (result.error) {
             errors.push(result.error);
-            piped.audioResult(h.url, "failure", result.error);
+            invidious.audioResult(h.url, "failure", result.error);
             continue;
           }
           if (!info || !Array.isArray(info.audioStreams)) {
@@ -187,7 +187,7 @@ export class StreamResolver {
               h.url,
             );
             errors.push(error);
-            piped.audioResult(h.url, "failure", error);
+            invidious.audioResult(h.url, "failure", error);
             continue;
           }
           metadataCount++;
@@ -220,7 +220,7 @@ export class StreamResolver {
               h.url,
             );
             errors.push(error);
-            piped.audioResult(h.url, "failure", error);
+            invidious.audioResult(h.url, "failure", error);
             continue;
           }
           for (const stream of streams) {
@@ -239,7 +239,7 @@ export class StreamResolver {
               this.cache.set(this.key(id, settings), prepared);
               if (this.cache.size > 12)
                 this.cache.delete(this.cache.keys().next().value!);
-              piped.audioResult(h.url, "prepared");
+              invidious.audioResult(h.url, "prepared");
               reliability.record({
                 trackId: id,
                 instance: h.url,
@@ -276,7 +276,7 @@ export class StreamResolver {
                 }
               }
               errors.push(error);
-              piped.audioResult(h.url, "failure", error);
+              invidious.audioResult(h.url, "failure", error);
               reliability.record({
                 trackId: id,
                 instance: h.url,

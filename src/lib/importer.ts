@@ -1,7 +1,7 @@
 import type { ImportItem, Track, Data } from "../types";
 import { videoId, placeholder, fromItem, unique, newId } from "./model";
 import { words, isCover } from "./recommend";
-import { piped } from "./piped";
+import { invidious } from "./invidious";
 export function parseList(text: string): ImportItem[] {
   const lines = text
     .split(/\r?\n/)
@@ -36,7 +36,7 @@ export async function resolveItem(
   if (id) {
     let track = placeholder(id);
     try {
-      const info = await piped.streams(id, signal);
+      const info = await invidious.streams(id, signal);
       track = {
         ...track,
         title: info.title,
@@ -51,7 +51,7 @@ export async function resolveItem(
     return { ...item, status: "matched", selected: id, candidates: [track] };
   }
   try {
-    const page = await piped.search(
+    const page = await invidious.search(
       item.query.replace(/[,，]/g, " "),
       undefined,
       signal,

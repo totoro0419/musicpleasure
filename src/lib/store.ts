@@ -9,7 +9,7 @@ import {
 } from "./model";
 import { readData, saveData } from "./storage";
 import { player, type PlaybackState } from "./player";
-import { piped } from "./piped";
+import { invidious } from "./invidious";
 import { recommend } from "./recommend";
 import { reliability, classify } from "./reliability";
 import { QueueTraversal } from "./sequence";
@@ -69,9 +69,9 @@ export const store = {
     }
     await reliability.init();
     loaded = true;
-    piped.preferred = data.settings.instance;
+    invidious.preferred = data.settings.instance;
     emit();
-    void piped.init();
+    void invidious.init();
   },
   update(fn: (d: Data) => Data, undo = false) {
     if (undo) {
@@ -262,7 +262,7 @@ export const store = {
   },
   settings(patch: Partial<Settings>) {
     this.update((d) => ({ ...d, settings: { ...d.settings, ...patch } }));
-    piped.preferred = data.settings.instance;
+    invidious.preferred = data.settings.instance;
   },
   async startRadio(track: Track) {
     this.addTracks([track]);
@@ -487,7 +487,7 @@ player.onListen = (seconds) => {
     },
   };
 };
-piped.onHealth = () => {
+invidious.onHealth = () => {
   healthRevision++;
   emit();
 };

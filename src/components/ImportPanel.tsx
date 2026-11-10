@@ -9,7 +9,7 @@ import {
 } from "../lib/importer";
 import { fromItem, newPlaylist } from "../lib/model";
 import type { Track } from "../types";
-import { piped } from "../lib/piped";
+import { invidious } from "../lib/invidious";
 export function ImportPanel() {
   const { data } = useStore();
   const [text, setText] = useState("");
@@ -94,7 +94,7 @@ export function ImportPanel() {
     setBusy(true);
     cancel.current = new AbortController();
     try {
-      const result = await piped.playlist(
+      const result = await invidious.playlist(
         id,
         next ? page : undefined,
         cancel.current.signal,

@@ -1,4 +1,4 @@
-import { piped } from "./piped";
+import { invidious } from "./invidious";
 import type { Settings, Track } from "../types";
 import { classify, PlaybackError, reliability } from "./reliability";
 import { StreamResolver, type PreparedAudio } from "./streams";
@@ -6,7 +6,7 @@ export type PlaybackStatus =
   "idle" | "loading" | "playing" | "paused" | "blocked" | "error" | "ended";
 export interface PlaybackState {
   status: PlaybackStatus;
-  engine: "piped" | null;
+  engine: "invidious" | null;
   position: number;
   duration: number;
   message: string;
@@ -93,7 +93,7 @@ export class MusicPlayer {
   }
   private activeSource() {
     return (
-      this.state.engine === "piped" &&
+      this.state.engine === "invidious" &&
       !!this.expectedSrc &&
       (this.audio.currentSrc || this.audio.src) === this.expectedSrc
     );
@@ -130,7 +130,7 @@ export class MusicPlayer {
         this.stallAt = 0;
         if (!this.audioConfirmed) {
           this.audioConfirmed = true;
-          piped.audioSuccess(this.state.instance);
+          invidious.audioSuccess(this.state.instance);
           reliability.success(this.state.trackId, this.state.instance);
         }
       } else if (this.stallAt && now - this.stallAt > 12000)
@@ -162,7 +162,7 @@ export class MusicPlayer {
       "play",
       this.state.instance,
     );
-    piped.audioResult(this.state.instance, "failure", error);
+    invidious.audioResult(this.state.instance, "failure", error);
     reliability.record({
       trackId: id,
       instance: this.state.instance,
@@ -255,7 +255,7 @@ export class MusicPlayer {
       trackId: track.id,
       duration: track.duration,
       position,
-      message: "Pipedの音声を確認しています",
+      message: "Invidiousの音声を確認しています",
       instance: "",
     });
     if ("mediaSession" in navigator)
@@ -281,10 +281,10 @@ export class MusicPlayer {
           uploaderUrl: prepared.info.uploaderUrl,
         });
         this.set({
-          engine: "piped",
+          engine: "invidious",
           instance: prepared.instance,
           duration: prepared.info.duration || track.duration,
-          message: "確認済みのPiped音声を開始しています",
+          message: "確認済みのInvidious音声を開始しています",
         });
         try {
           await this.startAudio(prepared, position, signal);
@@ -314,10 +314,10 @@ export class MusicPlayer {
           this.started = false;
           this.set({
             status: "loading",
-            message: "別のPiped音声で再試行しています",
+            message: "別のInvidious音声で再試行しています",
           });
           this.resolver.invalidate(track.id, prepared.stream.url);
-          piped.audioResult(prepared.instance, "failure", error);
+          invidious.audioResult(prepared.instance, "failure", error);
           reliability.record({
             trackId: track.id,
             instance: prepared.instance,

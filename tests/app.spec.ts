@@ -2,55 +2,27 @@ import { test, expect, type Page } from "@playwright/test";
 const id1 = "M7lc1UVf-VE",
   id2 = "aqz-KE-bpKQ";
 async function mocks(page: Page) {
-  await page.route("https://raw.githubusercontent.com/**", (r) =>
-    r.fulfill({ body: "", contentType: "text/plain" }),
-  );
   await page.route("https://**/*", (r) => {
     const url = new URL(r.request().url());
-    if (/piped/.test(url.hostname)) {
+    if (url.pathname.startsWith("/api/v1/")) {
       const headers = { "access-control-allow-origin": "*" };
-      if (url.pathname.startsWith("/streams/"))
-        return r.fulfill({
-          headers,
-          json: {
-            title: url.pathname.includes(id1) ? "Test Cover A" : "Test Cover B",
-            uploader: "Singer",
-            uploaderUrl: "/channel/UCtest",
-            thumbnailUrl: "",
-            duration: 60,
-            audioStreams: [],
-            relatedStreams: [
-              {
-                url: "/watch?v=" + id2,
-                title: "Test Cover B",
-                uploaderName: "Singer",
-                duration: 60,
-              },
-            ],
-          },
-        });
-      if (url.pathname === "/suggestions")
-        return r.fulfill({ headers, json: ["Test Cover"] });
-      return r.fulfill({
-        headers,
-        json: {
-          items: [
-            {
-              url: "/watch?v=" + id1,
-              title: "Test Cover A",
-              uploaderName: "Singer",
-              duration: 60,
-            },
-            {
-              url: "/watch?v=" + id2,
-              title: "Test Cover B",
-              uploaderName: "Singer",
-              duration: 60,
-            },
-          ],
-          nextpage: null,
-        },
-      });
+      if (url.pathname.startsWith("/api/v1/videos/")) {
+        const id = url.pathname.split("/").at(-1);
+        return r.fulfill({headers,json:{
+          videoId:id,title:id===id1?"Test Cover A":"Test Cover B",
+          author:"Singer",authorUrl:"/channel/UCtest",lengthSeconds:60,
+          videoThumbnails:[],adaptiveFormats:[],formatStreams:[],
+          recommendedVideos:[{type:"video",videoId:id2,title:"Test Cover B",author:"Singer",lengthSeconds:60}],
+        }});
+      }
+      if (url.pathname === "/api/v1/search/suggestions")
+        return r.fulfill({headers,json:{query:url.searchParams.get("q"),suggestions:["Test Cover"]}});
+      if (url.pathname === "/api/v1/search")
+        return r.fulfill({headers,json:[
+          {type:"video",videoId:id1,title:"Test Cover A",author:"Singer",lengthSeconds:60,videoThumbnails:[]},
+          {type:"video",videoId:id2,title:"Test Cover B",author:"Singer",lengthSeconds:60,videoThumbnails:[]},
+        ]});
+      return r.fulfill({headers,json:[]});
     }
     return r.continue();
   });
@@ -142,14 +114,14 @@ test("API failure is an error, never a false search success", async ({
   page,
 }) => {
   await page.route("https://**/*", (r) =>
-    /piped/.test(new URL(r.request().url()).hostname)
+    new URL(r.request().url()).pathname.startsWith("/api/v1/")
       ? r.fulfill({ status: 503, body: "unavailable" })
       : r.continue(),
   );
   await page.goto("./#search");
   await page.getByLabel("楽曲を検索").fill("unavailable music query");
   await page.getByRole("button", { name: "検索", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("Pipedに接続できません");
+  await expect(page.getByRole("alert")).toContainText("Invidious APIに接続できません");
   await expect(page.locator(".trackrow")).toHaveCount(0);
 });
 
@@ -180,29 +152,29 @@ test("decoded test audio: pause, seek, ended auto-next, route changes and radio 
   page,
 }) => {
   await mocks(page);
-  await page.route("https://**/streams/**", (r) =>
+  await page.route("https://**/api/v1/videos/**", (r) =>
     r.fulfill({
       json: {
         title: r.request().url().includes(id1)
           ? "Test Cover A"
           : "Test Cover B",
-        uploader: "Singer",
+        author: "Singer",
         uploaderUrl: "/channel/UCtest",
-        thumbnailUrl: "",
-        duration: 10,
-        audioStreams: [
+        videoThumbnails: [],
+        lengthSeconds: 10,
+        adaptiveFormats: [
           {
             url: "https://audio.musicpleasure.test/tone.wav",
-            mimeType: "audio/wav",
+            type: "audio/wav",
             bitrate: 128000,
           },
         ],
-        relatedStreams: [
+        recommendedVideos: [
           {
-            url: "/watch?v=" + id2,
+            videoId: id2,
             title: "Test Cover B",
-            uploaderName: "Singer",
-            duration: 10,
+            author: "Singer",
+            lengthSeconds: 10,
           },
         ],
       },
@@ -242,7 +214,7 @@ test("a refused middle song is skipped automatically without stopping the playli
 }) => {
   await mocks(page);
   const third = "jfKfPfyJRdk";
-  await page.route("https://**/streams/**", (r) =>
+  await page.route("https://**/api/v1/videos/**", (r) =>
     r.request().url().includes(id2)
       ? r.fulfill({
           status: 500,
@@ -253,14 +225,14 @@ test("a refused middle song is skipped automatically without stopping the playli
             title: r.request().url().includes(id1)
               ? "First playable"
               : "Last playable",
-            uploader: "Singer",
-            duration: 10,
-            thumbnailUrl: "",
-            relatedStreams: [],
-            audioStreams: [
+            author: "Singer",
+            lengthSeconds: 10,
+            videoThumbnails: [],
+            recommendedVideos: [],
+            adaptiveFormats: [
               {
                 url: "https://audio.musicpleasure.test/tone.wav",
-                mimeType: "audio/wav",
+                type: "audio/wav",
                 bitrate: 128000,
               },
             ],
