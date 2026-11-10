@@ -6,20 +6,19 @@ permissions:
   contents: read
 jobs:
   real-piped:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runtime: official-6d0ad06
-            image: 1337kavin/piped@sha256:9dce3a6b3ef4f37c0f298032c1e9a603df9f37dc8492161219e9f3ce9d7d8638
           - runtime: updated-newpipe-6cb36e98
             image: ghcr.io/spendable1569/piped-backend@sha256:9d70a6e20c645a92cb51f84a408e6898b688bafd9dd3df2dcbc6aeb8c4246c18
     steps:
       - uses: actions/checkout@v4
       - name: Install decoder
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+        timeout-minutes: 2
+        run: sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=15 update -qq && sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=15 install -y -qq ffmpeg
       - name: Start isolated Piped Backend and official audio proxy
         env:
           PIPED_IMAGE: ${{ matrix.image }}
