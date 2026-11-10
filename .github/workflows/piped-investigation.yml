@@ -7,7 +7,7 @@ permissions:
 jobs:
   real-piped:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -16,17 +16,30 @@ jobs:
             image: ghcr.io/spendable1569/piped-backend@sha256:9d70a6e20c645a92cb51f84a408e6898b688bafd9dd3df2dcbc6aeb8c4246c18
     steps:
       - uses: actions/checkout@v4
-      - name: Install decoder
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install decoder and local certificate tools
         timeout-minutes: 2
-        run: sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=15 update -qq && sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=15 install -y -qq ffmpeg
+        run: sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=15 update -qq && sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=15 install -y -qq ffmpeg mkcert libnss3-tools
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Trust loopback test certificates and start TLS transport
+        run: |
+          mkdir -p "$HOME/.pki/nssdb"
+          certutil -d "sql:$HOME/.pki/nssdb" -N --empty-password
+          mkcert -install
+          mkcert -cert-file "$RUNNER_TEMP/piped-cert.pem" -key-file "$RUNNER_TEMP/piped-key.pem" localhost 127.0.0.1
+          node diagnostics/piped_https.mjs "$RUNNER_TEMP/piped-cert.pem" "$RUNNER_TEMP/piped-key.pem" > "$RUNNER_TEMP/piped-tls.log" 2>&1 &
       - name: Start isolated Piped Backend and official audio proxy
         env:
           PIPED_IMAGE: ${{ matrix.image }}
         run: |
           cat > "$RUNNER_TEMP/piped.properties" <<'CONFIG'
           PORT: 8080
-          PROXY_PART: http://127.0.0.1:8092
-          API_URL: http://127.0.0.1:8091
+          PROXY_PART: https://localhost:8443
+          API_URL: https://localhost:8443/api
           FRONTEND_URL: http://127.0.0.1:4173
           hibernate.connection.url: jdbc:hsqldb:mem:memdb;sql.syntax_pgs=true
           hibernate.connection.driver_class: org.hsqldb.jdbcDriver
@@ -41,15 +54,27 @@ jobs:
           SENTRY_DSN:
           CONFIG
           docker run -d --name trial-proxy -p 127.0.0.1:8092:8080 1337kavin/piped-proxy@sha256:a49b74a2e085213d86729cfe3820ec54d22debffaeac977cf9982bd5ffafb2c8
+          docker run -d --name trial-backend -p 127.0.0.1:8091:8080 -e JAVA_TOOL_OPTIONS='-XX:ActiveProcessorCount=2 -Xmx512m' -v "$RUNNER_TEMP/piped.properties:/app/config.properties:ro" 1337kavin/piped@sha256:9dce3a6b3ef4f37c0f298032c1e9a603df9f37dc8492161219e9f3ce9d7d8638
+          python3 diagnostics/piped_self_host.py --runtime official-same-runner
+          docker rm -f trial-backend
           docker run -d --name trial-backend -p 127.0.0.1:8091:8080 -e JAVA_TOOL_OPTIONS='-XX:ActiveProcessorCount=2 -Xmx512m' -v "$RUNNER_TEMP/piped.properties:/app/config.properties:ro" "$PIPED_IMAGE"
       - name: Same ten posts through real Piped and its audio proxy
         run: python3 diagnostics/piped_self_host.py --runtime '${{ matrix.runtime }}'
+      - name: Actual PC and Android tablet playback, queue and radio qualification
+        env:
+          LIVE_TESTS: "1"
+        run: |
+          python3 diagnostics/prepare_piped_ui.py
+          npx playwright test tests/piped-self-host.spec.ts --project desktop --project android-tablet --retries=0 --workers=1
       - name: Save sanitized results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: piped-investigation-${{ matrix.runtime }}
-          path: investigation-results/
+          path: |
+            investigation-results/
+            test-results/
+            playwright-report/
       - name: Stop disposable services
         if: always()
         run: docker rm -f trial-backend trial-proxy || true

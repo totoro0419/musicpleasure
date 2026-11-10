@@ -73,7 +73,7 @@ def probe(track):
             for stream in candidates:
                 # Only use the media proxy returned by our Piped Backend.
                 parsed = urllib.parse.urlparse(stream['url'])
-                if parsed.hostname != '127.0.0.1' or parsed.port != 8092:
+                if (parsed.hostname, parsed.port) not in [('127.0.0.1', 8092), ('localhost', 8443)]:
                     raise ValueError('Unexpected media origin from trial Piped')
                 query = urllib.parse.parse_qs(parsed.query)
                 media = {key: stream.get(key) for key in ['mimeType', 'codec', 'quality', 'bitrate']}
