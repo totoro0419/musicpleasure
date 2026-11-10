@@ -121,7 +121,7 @@ test("API failure is an error, never a false search success", async ({
   await page.goto("./#search");
   await page.getByLabel("楽曲を検索").fill("unavailable music query");
   await page.getByRole("button", { name: "検索", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("invidiousに接続できません");
+  await expect(page.getByRole("alert")).toContainText("Invidious APIに接続できません");
   await expect(page.locator(".trackrow")).toHaveCount(0);
 });
 
