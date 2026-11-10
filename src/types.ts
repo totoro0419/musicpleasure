@@ -8,6 +8,21 @@ export interface Track {
   uploaded?: string;
   verified?: boolean;
   reason?: string;
+  source?: "local" | "invidious";
+  local?: { filename: string; bytes: number; mime: string; hash: string; added: number; available: boolean };
+}
+export interface PlaylistImport {
+  id: string;
+  name: string;
+  tracks: Track[];
+  unavailable: { title: string; reason: string }[];
+  next: string;
+  pages: string[];
+  fingerprints?: string[];
+  received: number;
+  total?: number;
+  status: "paused" | "fetching" | "complete" | "error";
+  error?: string;
 }
 export interface Playlist {
   id: string;
@@ -35,6 +50,7 @@ export interface Settings {
   discovery: number;
   weights: { related: number; favorite: number; fresh: number; recent: number };
   theme: "dark" | "light";
+  prefetch?: boolean;
 }
 export interface ImportItem {
   query: string;
@@ -61,6 +77,8 @@ export interface Data {
   settings: Settings;
   searches: string[];
   importJob: ImportItem[];
+  playlistImport?: PlaylistImport;
+  additions?: Record<string, number>;
 }
 export interface InvidiousItem {
   url?: string;
@@ -103,6 +121,7 @@ export interface SearchPage {
   suggestion?: string;
 }
 export interface InstanceHealth {
+  mediaRoute?: "direct" | "proxy";
   url: string;
   success: number;
   failure: number;

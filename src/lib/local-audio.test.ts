@@ -1,0 +1,20 @@
+import "fake-indexeddb/auto";
+import { it, expect, beforeAll } from "vitest";
+import { openDB } from "idb";
+import { emptyData, newPlaylist, placeholder, validateBackup } from "./model";
+import type { Track } from "../types";
+const id="local-"+"a".repeat(64);
+const t:Track={id,title:"Local",uploader:"Artist",thumbnail:"",duration:6,source:"local",local:{hash:"a".repeat(64),filename:"test.wav",bytes:3,mime:"audio/wav",added:1,available:true}};
+beforeAll(async()=>{const old=await openDB("musicpleasure-v2",2,{upgrade(d){d.createObjectStore("state");}});const state=emptyData();state.tracks["M7lc1UVf-VE"]=placeholder("M7lc1UVf-VE");state.playlists=[newPlaylist("Existing",["M7lc1UVf-VE"])];await old.put("state",state,"app");old.close();});
+it("migrates v2 without deleting the original library",async()=>{const {readData,db}=await import("./storage");expect((await readData()).playlists[0].name).toBe("Existing");expect((await db()).version).toBe(3);});
+it("persists binary and metadata separately and restores/deletes them",async()=>{const {putAudio,savedAudio,reconcileLocal,deleteAudio}=await import("./local-audio");await putAudio(t,new Blob(["abc"]));expect(await(await savedAudio(id))?.text()).toBe("abc");expect((await reconcileLocal({}))[id].local?.available).toBe(true);await deleteAudio(id);expect(await savedAudio(id)).toBeUndefined();expect((await reconcileLocal({[id]:t}))[id].local?.available).toBe(false);});
+it("aborts both records when metadata cannot be cloned",async()=>{const {putAudio,savedAudio}=await import("./local-audio");await expect(putAudio({...t,title:(()=>{}) as unknown as string},new Blob(["abc"]))).rejects.toThrow();expect(await savedAudio(id)).toBeUndefined();});
+it("detects quota before write and validates local backups as metadata only",async()=>{const {ensureCapacity,audioType}=await import("./local-audio");expect(()=>ensureCapacity(200,900,1000)).toThrow(/容量/);expect(audioType({name:"music.flac",type:""})).toBe("audio/flac");const d=emptyData();d.tracks[id]=t;d.queue=[id];const clean=validateBackup(d);expect(clean.queue).toEqual([id]);expect(clean.tracks[id].local?.available).toBe(false);expect(JSON.stringify(clean)).not.toContain("data:audio");});
+it("serializes snapshots and rejects overwriting a newer tab revision",async()=>{
+ const {readData,saveData,db}=await import("./storage");
+ const state=await readData();await Promise.all([saveData({...state,position:1}),saveData({...state,position:2})]);
+ const d=await db();expect((await d.get("state","app")).position).toBe(2);
+ const revision=await d.get("state","revision");await d.put("state",revision+1,"revision");
+ await expect(saveData({...state,position:999})).rejects.toThrow(/別のタブ/);
+ expect((await d.get("state","app")).position).toBe(2);
+});

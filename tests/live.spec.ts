@@ -200,6 +200,7 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
           .getByRole("button", { name: "再生", exact: true })
           .click();
         for (let i = 0; i < 3; i++) {
+          await expect(page.locator(".mini-track")).toHaveAttribute("data-track-id", good[i], { timeout: 32000 });
           await progresses();
           if (i < 2)
             await page.getByLabel("再生位置", { exact: true }).press("End");
@@ -250,8 +251,8 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
   // A green live qualification requires the full requested three-source result, not one cached hit.
   expect(
     report.actualPlayableCount,
-    "three distinct real YouTube posts must play",
-  ).toBeGreaterThanOrEqual(3);
+    "ten distinct real YouTube posts must play",
+  ).toBeGreaterThanOrEqual(10);
   expect(report.continuousThreeDistinct).toBe("passed");
   expect(report.radioContinuation).toBe("passed");
 });

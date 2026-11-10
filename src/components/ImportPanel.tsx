@@ -7,9 +7,8 @@ import {
   planCommand,
   type CommandPlan,
 } from "../lib/importer";
-import { fromItem, newPlaylist } from "../lib/model";
-import type { Track } from "../types";
-import { invidious } from "../lib/invidious";
+import { playlistId, newPlaylist } from "../lib/model";
+import { fetchPlaylist, playlistJob } from "../lib/playlist-import";
 export function ImportPanel() {
   const { data } = useStore();
   const [text, setText] = useState("");
@@ -19,12 +18,12 @@ export function ImportPanel() {
   const [command, setCommand] = useState("");
   const [plan, setPlan] = useState<CommandPlan | null>(null);
   const [playlistURL, setPlaylistURL] = useState("");
-  const [preview, setPreview] = useState<Track[]>([]);
-  const [playlistName, setPlaylistName] = useState("YouTubeから取り込み");
-  const [page, setPage] = useState<string | undefined>();
-  const [previewId, setPreviewId] = useState("");
+  const job = data.playlistImport;
+  const preview = job?.tracks || [];
+  const playlistName = job?.name || "YouTubeから取り込み";
   const [error, setError] = useState("");
   useEffect(() => () => cancel.current?.abort(), []);
+  useEffect(() => setPlan(null), [target]);
   const items = data.importJob;
   async function run(reset = false) {
     setError("");
@@ -73,50 +72,20 @@ export function ImportPanel() {
     );
     store.notify(`${chosen.length}曲を登録しました。元に戻すで取り消せます。`);
   }
-  async function loadPlaylist(next = false) {
+  async function loadPlaylist(resume = false) {
     setError("");
-    let id = previewId;
-    if (!next) {
-      try {
-        const u = new URL(playlistURL);
-        if (!/(^|\.)youtube\.com$|^youtu\.be$/.test(u.hostname))
-          throw Error("YouTube URLを入力してください");
-        id = u.searchParams.get("list") || "";
-        if (!/^[\w-]+$/.test(id))
-          throw Error("プレイリストURLを入力してください");
-        setPreviewId(id);
-        setPreview([]);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-        return;
-      }
-    }
-    setBusy(true);
-    cancel.current = new AbortController();
+    const id = playlistId(playlistURL);
+    if (!resume && !id) { setError("YouTubeプレイリストURLを入力してください"); return; }
+    const work = resume ? job : playlistJob(id!);
+    if (!work) return;
+    setBusy(true); cancel.current = new AbortController();
     try {
-      const result = await invidious.playlist(
-        id,
-        next ? page : undefined,
-        cancel.current.signal,
-      );
-      setPlaylistName(result.name || playlistName);
-      const tracks = result.relatedStreams
-        .map(fromItem)
-        .filter((x): x is Track => !!x);
-      setPreview((prior) =>
-        next
-          ? [...new Map([...prior, ...tracks].map((t) => [t.id, t])).values()]
-          : tracks,
-      );
-      setPage(result.nextpage || undefined);
-    } catch (e) {
-      if (!cancel.current.signal.aborted)
-        setError(
-          `取得済みの曲は保持しています。${e instanceof Error ? e.message : String(e)}`,
-        );
-    } finally {
-      setBusy(false);
-    }
+      await fetchPlaylist(work, async (playlistImport) => {
+        store.update(d => ({ ...d, playlistImport }));
+        await store.flush();
+      }, cancel.current.signal);
+    } catch (e) { setError(String(e)); }
+    finally { setBusy(false); }
   }
   const complete = items.filter((x) => x.status !== "pending").length;
   return (
@@ -255,14 +224,12 @@ export function ImportPanel() {
               disabled={busy || !playlistURL}
               onClick={() => void loadPlaylist()}
             >
-              プレビュー取得
+              全ページを自動取得
             </button>
-            {page && (
-              <button disabled={busy} onClick={() => void loadPlaylist(true)}>
-                次のページを取得
-              </button>
-            )}
+            {job?.next && job.status !== "complete" && <button disabled={busy} onClick={() => void loadPlaylist(true)}>取得を再開 / 再試行</button>}
+            {busy && <button onClick={() => cancel.current?.abort()}>取得を中断</button>}
           </div>
+          {job && <div role="status"><p>{job.tracks.length}曲取得 / {job.received}件確認{job.total !== undefined ? ` / 全${job.total}件` : ""} · {job.status === "complete" ? "全ページ取得完了" : job.status === "fetching" ? "取得中" : job.status === "error" ? "取得未完了" : "中断中"}</p>{job.status === "fetching" && <progress aria-label="プレイリスト取得の進捗" value={job.total ? job.received : undefined} max={job.total || 1} />}{job.error && <p className="error">{job.error}</p>}{job.unavailable.map((x,i) => <p key={i}>{x.title}：{x.reason}</p>)}</div>}
           {preview.length > 0 && (
             <>
               <p>
@@ -275,6 +242,7 @@ export function ImportPanel() {
               </div>
               <button
                 className="primary"
+                disabled={busy}
                 onClick={() => {
                   store.addTracks(preview);
                   if (target)
@@ -308,9 +276,8 @@ export function ImportPanel() {
           <h3>
             <Sparkles size={18} /> ことばで整理
           </h3>
-          <p className="muted">
-            無料のルール解析です。音声解析や外部AIへの送信は行いません。
-          </p>
+          <p className="muted">端末内で日本語を解析します。作成・名前変更・追加・削除・移動・結合・複製・並べ替え・抽出・重複整理に対応します。対象は上の登録先で選択したリストです。</p>
+          <details><summary>操作の例を見る</summary><p>「通学」を作って / 名前を「夜」に変更 / 「曲名」を追加 / 「歌い手」を削除 / お気に入りを「通学」へ移動 / 「別のリスト」と結合 / 「コピー」として複製 / アーティスト順に並べ替え / 時間の長い順にソート / 5分以上の曲を抽出 / 歌ってみたを抽出 / 重複を整理</p></details>
           <label>
             操作内容
             <input
@@ -340,9 +307,11 @@ export function ImportPanel() {
               <button
                 className="primary"
                 onClick={() => {
-                  store.update(plan.execute, true);
-                  setPlan(null);
-                  store.notify("変更しました。元に戻すで取り消せます。");
+                  try {
+                    store.update(plan.execute, true);
+                    setPlan(null);
+                    store.notify("変更しました。元に戻すで取り消せます。");
+                  } catch(e) { setError(e instanceof Error ? e.message : String(e)); setPlan(null); }
                 }}
               >
                 この変更を実行

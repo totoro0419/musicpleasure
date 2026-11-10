@@ -35,6 +35,7 @@ import { Radio, modeLabels } from "./components/Radio";
 import { ImportPanel } from "./components/ImportPanel";
 import { Settings } from "./components/Settings";
 import { TrackList } from "./components/TrackList";
+import { LocalLibrary } from "./components/LocalLibrary";
 interface InstallPrompt extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: string }>;
@@ -43,6 +44,7 @@ const nav = [
   { id: "home", label: "ホーム", icon: Home },
   { id: "search", label: "探す", icon: SearchIcon },
   { id: "library", label: "ライブラリ", icon: LibraryIcon },
+  { id: "local", label: "保存した音楽", icon: Download },
   { id: "radio", label: "ラジオ", icon: RadioIcon },
   { id: "import", label: "一括登録", icon: Sparkles },
 ];
@@ -120,7 +122,7 @@ function NowPlaying({ onAdd }: { onAdd: (ids: string[]) => void }) {
       {t ? (
         <>
           <section className="nowplaying">
-            <img className="album" src={t.thumbnail} alt="" />
+            {t.thumbnail ? <img className="album" src={t.thumbnail} alt="" /> : <div className="album local-art"><Music2 size={72} /></div>}
             <div>
               <span className="eyebrow">NOW PLAYING</span>
               <h2>{t.title}</h2>
@@ -428,7 +430,7 @@ export default function App() {
         {!online && (
           <div className="offline">
             <WifiOff size={17} />
-            オフラインです。保存したライブラリを閲覧できます。
+            オフラインです。保存した音声を再生できます。<a href="#local">保存した音楽へ</a>
           </div>
         )}
         {update && (
@@ -456,6 +458,8 @@ export default function App() {
             <Search onAdd={onAdd} />
           ) : active === "library" || active === "playlist" ? (
             <Library key={route} id={route.split("/")[1]} onAdd={onAdd} />
+          ) : active === "local" ? (
+            <LocalLibrary onAdd={onAdd} />
           ) : active === "radio" ? (
             <Radio onAdd={onAdd} />
           ) : active === "import" ? (
@@ -553,8 +557,8 @@ export default function App() {
         >
           <X size={18} />
         </button>
-        <a className="mini-track" href="#playing">
-          {current ? (
+        <a className="mini-track" data-track-id={current?.id || ""} href="#playing">
+          {current?.thumbnail ? (
             <img src={current.thumbnail} alt="" />
           ) : (
             <span className="mini-placeholder">
@@ -688,7 +692,7 @@ export default function App() {
             }}
           />
           <span className="engine-badge">
-            {playback.engine === "invidious" ? "Invidious" : "AUDIO"}
+            {playback.engine === "local" ? "OFFLINE" : playback.engine === "invidious" ? "Invidious" : "AUDIO"}
           </span>
         </div>
         {(playback.message ||
@@ -709,7 +713,7 @@ export default function App() {
       </section>
       )}
       <nav className="mobile-nav" aria-label="モバイルナビゲーション">
-        {nav.slice(0, 4).map((n) => (
+        {nav.filter(n => ["home", "search", "library", "radio"].includes(n.id)).map((n) => (
           <a
             className={active === n.id ? "active" : ""}
             key={n.id}
