@@ -307,3 +307,42 @@ test("search does not enqueue candidates; tapping a result plays only that track
   await goto(page, "queue");
   await expect(page.locator(".trackrow")).toHaveCount(2);
 });
+
+test("UI quality: home actions are obvious and directly navigate to their destination", async ({ page }) => {
+  await mocks(page);
+  await page.goto("./");
+  await expect(page.getByRole("heading", { name: "次の一曲に、出会おう。" })).toBeVisible();
+  const home = page.locator(".home-dashboard");
+  await expect(home.getByRole("link", { name: /曲を検索する/ })).toBeVisible();
+  await expect(home.getByRole("link", { name: /プレイリストを見る/ })).toBeVisible();
+  await home.getByRole("link", { name: /曲を検索する/ }).click();
+  await expect(page.getByRole("heading", { name: "聴きたい曲を探す" })).toBeVisible();
+  await expect(page.getByText("検索するだけではキューは変わりません。")).toBeVisible();
+});
+
+test("UI quality: technical connection details are opt-in, not shown by default", async ({ page }) => {
+  await mocks(page);
+  await page.goto("./#settings");
+  const details = page.locator(".advanced-instance-list");
+  await expect(details).toBeVisible();
+  await expect(details).not.toHaveAttribute("open");
+  await details.locator("summary").click();
+  await expect(details).toHaveAttribute("open", "");
+});
+
+test("UI quality: mobile and tablet primary actions are usable touch targets", async ({ page }) => {
+  await mocks(page);
+  await page.goto("./");
+  const controls = page.locator(".home-primary-actions .button");
+  await expect(controls).toHaveCount(2);
+  for (const control of await controls.all()) {
+    const box = await control.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+  await page.goto("./#search");
+  const search = page.getByRole("button", { name: "検索", exact: true });
+  const bounds = await search.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds!.height).toBeGreaterThanOrEqual(44);
+});

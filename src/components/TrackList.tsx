@@ -23,6 +23,8 @@ export function TrackList({
   onRemove,
   queue = false,
   singlePlay = false,
+  queueOffset = 0,
+  onPlay,
 }: {
   tracks: Track[];
   onAdd?: (ids: string[]) => void;
@@ -32,6 +34,8 @@ export function TrackList({
   onRemove?: (index: number) => void;
   queue?: boolean;
   singlePlay?: boolean;
+  queueOffset?: number;
+  onPlay?: (track: Track, index: number) => void;
 }) {
   const { data } = useStore();
   const parent = useRef<HTMLDivElement>(null);
@@ -47,6 +51,26 @@ export function TrackList({
   const rows = useVirtual
     ? virtual.getVirtualItems()
     : tracks.map((_, index) => ({ index, start: 0, size: 88 }));
+  function playTrack(track: Track, index: number) {
+    if (onPlay) {
+      onPlay(track, index);
+      return;
+    }
+    if (queue) {
+      store.update((d) => ({
+        ...d,
+        current: index + queueOffset,
+        position: 0,
+      }));
+      void store.playCurrent();
+      return;
+    }
+    if (singlePlay) {
+      store.playList([track.id], 0, true);
+      return;
+    }
+    store.playList(tracks.map((item) => item.id), index);
+  }
   function selection(id: string) {
     const next = selected.includes(id)
       ? selected.filter((x) => x !== id)
@@ -121,20 +145,7 @@ export function TrackList({
                 <button
                   className="trackart"
                   aria-label={`${t.title}を再生`}
-                  onClick={() => {
-                    if (queue) {
-                      store.update((d) => ({
-                        ...d,
-                        current: row.index,
-                        position: 0,
-                      }));
-                      void store.playCurrent();
-                    } else if (singlePlay) store.playList([t.id], 0, true);
-                      else store.playList(
-                        tracks.map((t) => t.id),
-                        row.index,
-                      );
-                  }}
+                  onClick={() => playTrack(t, row.index)}
                 >
                   <img loading="lazy" src={t.thumbnail} alt="" />
                   <Play size={20} fill="currentColor" />
@@ -142,20 +153,8 @@ export function TrackList({
                 <div className="tracktext">
                   <button
                     className="textbutton title"
-                    onClick={() => {
-                      if (queue) {
-                        store.update((d) => ({
-                          ...d,
-                          current: row.index,
-                          position: 0,
-                        }));
-                        void store.playCurrent();
-                      } else if (singlePlay) store.playList([t.id], 0, true);
-                        else store.playList(
-                          tracks.map((t) => t.id),
-                          row.index,
-                        );
-                    }}
+                    aria-label={`${t.title}を再生`}
+                    onClick={() => playTrack(t, row.index)}
                   >
                     {t.title}
                   </button>
@@ -186,7 +185,7 @@ export function TrackList({
                     if (e.currentTarget.open) setOpen(`${t.id}-${row.index}`);
                   }}
                 >
-                  <summary aria-label={`${t.title}の操作`}>•••</summary>
+                  <summary aria-label={`${t.title}のその他の操作`} title="その他の操作">•••</summary>
                   <div className="menuitems">
                     <button
                       onClick={() => {
