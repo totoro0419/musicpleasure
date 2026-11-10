@@ -94,6 +94,49 @@ describe("decoded-audio preparation", () => {
     );
     expect(invidious.health[0].lastAudioError).toContain("403");
   });
+
+  it("recovers through Invidious local proxy after the normal audio URL fails", async () => {
+    const at = vi.spyOn(invidious, "at").mockImplementation(async (host, path) =>
+      path.includes("local=true")
+        ? info([host + "/videoplayback?itag=140"])
+        : info(["https://audio.test/blocked"]),
+    );
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 403 })));
+    const probe = vi.fn(async (s) => {
+      if (s.url.includes("/blocked"))
+        throw new PlaybackError("network_or_cors", "opaque", "probe");
+    });
+    const resolver = new StreamResolver(() => "probably", probe);
+    const result = await resolver.prepare("M7lc1UVf-VE", emptyData().settings);
+    expect(result.stream.url).toContain("/videoplayback");
+    expect(result.checked).toBe("decoded");
+    expect(at.mock.calls.some(([,p]) => p.includes("?local=true"))).toBe(true);
+    expect(invidious.health.find((h) => h.url === result.instance)?.audioCooldown).toBe(0);
+  });
+
+  it("uses local latest_version with the selected itag if API-local URLs are unusable", async () => {
+    const direct = { ...info(["https://audio.test/broken"]), audioStreams: [
+      { url: "https://audio.test/broken", mimeType: "audio/mp4", bitrate: 128000, itag: "140" },
+    ] };
+    vi.spyOn(invidious, "at").mockResolvedValue(direct);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", {status:403})));
+    const r = new StreamResolver(() => "probably", async (s) => {
+      if (s.url.includes("audio.test"))
+        throw new PlaybackError("network_or_cors", "opaque", "probe");
+    });
+    const prepared = await r.prepare("M7lc1UVf-VE", emptyData().settings);
+    expect(prepared.stream.url).toContain("/latest_version");
+    expect(new URL(prepared.stream.url).searchParams.get("local")).toBe("true");
+    expect(new URL(prepared.stream.url).searchParams.get("itag")).toBe("140");
+  });
+
+  it("does not request a proxy when a normal audio URL already decodes", async () => {
+    const at = vi.spyOn(invidious, "at").mockResolvedValue(info());
+    const r = new StreamResolver(() => "probably", async () => {});
+    await r.prepare("M7lc1UVf-VE", emptyData().settings);
+    expect(at.mock.calls.some(([,p]) => p.includes("?local=true"))).toBe(false);
+  });
+
   it("does not use expired signed URLs from the prepared cache", async () => {
     const at = vi
       .spyOn(invidious, "at")

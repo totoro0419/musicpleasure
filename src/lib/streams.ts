@@ -191,103 +191,126 @@ export class StreamResolver {
             continue;
           }
           metadataCount++;
-          const all = [
+          const streamsFrom = (source: StreamInfo) => [
+            ...compatibleStreams(source.audioStreams, this.canPlay, settings.quality),
             ...compatibleStreams(
-              info.audioStreams,
-              this.canPlay,
-              settings.quality,
-            ),
-            ...compatibleStreams(
-              (info.videoStreams || []).filter((s) => s.videoOnly === false),
-              this.canPlay,
-              settings.quality,
-              true,
+              (source.videoStreams || []).filter((s) => s.videoOnly === false),
+              this.canPlay, settings.quality, true,
             ),
           ];
-          const streams = all
-            .filter((s) => (this.badURLs.get(id)?.get(s.url) || 0) < Date.now())
-            .slice(0, 3);
-          if (!streams.length) {
-            const present =
-              info.audioStreams.length +
-              (info.videoStreams?.filter((s) => !s.videoOnly).length || 0);
-            const error = new PlaybackError(
-              present ? "unsupported_format" : "no_stream",
-              present
-                ? "対応する音声形式がないか、この音声URLで再生に失敗済みです"
-                : "API応答に音声を含む配信URLがありません",
-              "streams",
-              h.url,
-            );
-            errors.push(error);
-            invidious.audioResult(h.url, "failure", error);
-            continue;
-          }
-          for (const stream of streams) {
+          const direct = streamsFrom(info);
+          const tried = new Set<string>();
+          const attempt = async (stream: AudioStream): Promise<PreparedAudio | undefined> => {
+            if (tried.has(stream.url) ||
+              (this.badURLs.get(id)?.get(stream.url) || 0) >= Date.now()) return;
+            tried.add(stream.url);
             try {
               signal.throwIfAborted();
               await this.probe(stream, signal);
               signal.throwIfAborted();
               const prepared: PreparedAudio = {
-                id,
-                instance: h.url,
-                info,
-                stream,
-                at: Date.now(),
-                checked: "decoded",
+                id, instance: h.url, info, stream, at: Date.now(), checked: "decoded",
               };
               this.cache.set(this.key(id, settings), prepared);
-              if (this.cache.size > 12)
-                this.cache.delete(this.cache.keys().next().value!);
+              if (this.cache.size > 12) this.cache.delete(this.cache.keys().next().value!);
               invidious.audioResult(h.url, "prepared");
               reliability.record({
-                trackId: id,
-                instance: h.url,
-                stage: "probe",
-                outcome: "success",
+                trackId: id, instance: h.url, stage: "probe", outcome: "success",
                 host: new URL(stream.url).hostname,
-                detail: "音声データの読み込み・デコードまで確認（実再生前）",
+                detail: stream.url.startsWith(h.url + "/")
+                  ? "Invidious経由の音声をデコード確認（実再生前）"
+                  : "直接配信の音声をデコード確認（実再生前）",
               });
               return prepared;
             } catch (e) {
               if (signal.aborted) throw e;
               let error = classify(e, "probe", h.url);
-              // Media errors are opaque. Only a readable HTTP response can prove a URL rejection.
+              // A readable HTTP response is stronger evidence than MediaError 4.
+              // Limit diagnostic latency so recovery isn't delayed.
               if (error.kind === "network_or_cors") {
                 try {
                   const response = await fetch(stream.url, {
                     headers: { Range: "bytes=0-1023" },
-                    signal: AbortSignal.any([
-                      signal,
-                      AbortSignal.timeout(1500),
-                    ]),
+                    signal: AbortSignal.any([signal, AbortSignal.timeout(500)]),
                   });
                   await response.body?.cancel();
-                  if (!response.ok)
-                    error = new PlaybackError(
-                      "media_http",
-                      `音声URLがHTTP ${response.status}を返しました`,
-                      "probe",
-                      h.url,
-                      response.status,
-                    );
+                  if (!response.ok) error = new PlaybackError(
+                    "media_http", "音声URLがHTTP " + response.status + "を返しました",
+                    "probe", h.url, response.status,
+                  );
                 } catch {
-                  /* Network and CORS remain explicitly indistinguishable. */
+                  // CORS and network failures remain indistinguishable.
                 }
               }
               errors.push(error);
               invidious.audioResult(h.url, "failure", error);
               reliability.record({
-                trackId: id,
-                instance: h.url,
-                stage: "probe",
-                outcome: "failure",
-                kind: error.kind,
-                status: error.status,
-                host: new URL(stream.url).hostname,
-                detail: error.message,
+                trackId: id, instance: h.url, stage: "probe",
+                outcome: "failure", kind: error.kind, status: error.status,
+                host: new URL(stream.url).hostname, detail: error.message,
               });
             }
+          };
+
+          if (!direct.length) {
+            const present = info.audioStreams.length +
+              (info.videoStreams?.filter((s) => !s.videoOnly).length || 0);
+            const error = new PlaybackError(
+              present ? "unsupported_format" : "no_stream",
+              present ? "この端末に対応した音声形式がありません"
+                : "API応答に音声を含む配信URLがありません",
+              "streams", h.url,
+            );
+            errors.push(error);
+            invidious.audioResult(h.url, "failure", error);
+            continue;
+          }
+
+          // Direct audio is fast when it works. Recover via local proxy
+          // before retrying similarly blocked googlevideo URLs.
+          const first = await attempt(direct[0]);
+          if (first) return first;
+
+          let proxyInfo: StreamInfo | undefined;
+          try {
+            proxyInfo = await invidious.at<StreamInfo>(
+              h.url, "/api/v1/videos/" + id + "?local=true", signal, 4000,
+            );
+          } catch (e) {
+            if (signal.aborted) throw e;
+            const error = classify(e, "streams", h.url);
+            errors.push(error);
+            reliability.record({
+              trackId: id, instance: h.url, stage: "streams",
+              outcome: "failure", kind: error.kind, status: error.status,
+              detail: "Invidious音声プロキシ取得失敗: " + error.message,
+            });
+          }
+          if (proxyInfo) {
+            const localStreams = streamsFrom(proxyInfo)
+              .filter((s) => s.url.startsWith(h.url + "/"))
+              .slice(0, 2);
+            for (const stream of localStreams) {
+              const playable = await attempt(stream);
+              if (playable) return playable;
+            }
+          }
+
+          // Alternative local proxy endpoint for servers that support it.
+          const preferredItags = direct.filter((s) => s.itag).slice(0, 1);
+          for (const source of preferredItags) {
+            const u = new URL("/latest_version", h.url);
+            u.searchParams.set("id", id);
+            u.searchParams.set("itag", source.itag!);
+            u.searchParams.set("local", "true");
+            const playable = await attempt({ ...source, url: u.href });
+            if (playable) return playable;
+          }
+
+          // A proxy can be unavailable; still try other direct codecs.
+          for (const stream of direct.slice(1, 3)) {
+            const playable = await attempt(stream);
+            if (playable) return playable;
           }
         }
       }

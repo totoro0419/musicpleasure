@@ -37,7 +37,8 @@ function normalizeFormat(raw:Raw,base:string):AudioStream{
   let url="";
   try{const u=new URL(String(raw.url||""),base);if(u.protocol==="https:")url=u.href;}catch{}
   const type=String(raw.type||"");
-  return {url,mimeType:type.split(";")[0].trim(),
+  return {url, itag:/^[0-9]{1,3}$/.test(String(raw.itag||""))?String(raw.itag):undefined,
+    mimeType:type.split(";")[0].trim(),
     codec:type.match(/codecs?=["']?([^"';]+)["']?/i)?.[1],
     bitrate:Number(raw.bitrate)||0,quality:String(raw.audioQuality||raw.qualityLabel||raw.quality||"")};
 }
@@ -110,7 +111,7 @@ export class InvidiousClient{
  }
  audioResult(url:string,result:"prepared"|"failure",error?:PlaybackError){
   const h=this.health.find(h=>h.url===url);if(!h)return;
-  if(result==="prepared")h.audioPrepared=(h.audioPrepared||0)+1;
+  if(result==="prepared"){h.audioPrepared=(h.audioPrepared||0)+1;h.audioCooldown=0;h.lastAudioError="";}
   else if(error&&!["cancelled","autoplay_blocked","unsupported_format"].includes(error.kind)){
    h.audioFailure=(h.audioFailure||0)+1;h.lastAudioError=error.message;
    if(["network_or_cors","timeout","api_unavailable","invalid_response"].includes(error.kind))
@@ -137,12 +138,12 @@ export class InvidiousClient{
    const h=this.health.find(h=>h.url===url);
    if(h){h.success++;h.latency=performance.now()-started;h.lastChecked=Date.now();
     h.cooldown=0;h.lastError="";this.record();}
-   return (video?normalizeVideo(data,url,path.split("/")[4]):data) as T;
+   return (video?normalizeVideo(data,url,path.split("/")[4]?.split("?")[0]):data) as T;
   }catch(e){
    const err=classify(e,video?"streams":"api",url);
    if(!signal?.aborted){
     if(!["upstream_rejected","no_stream"].includes(err.kind))this.failure(url,err);
-    reliability.record({trackId:video?path.split("/")[4]:undefined,instance:url,
+    reliability.record({trackId:video?path.split("/")[4]?.split("?")[0]:undefined,instance:url,
       stage:err.stage,outcome:"failure",kind:err.kind,status:err.status,detail:err.message});
    }
    throw err;

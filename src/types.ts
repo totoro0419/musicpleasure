@@ -78,6 +78,8 @@ export interface InvidiousItem {
 }
 export interface AudioStream {
   url: string;
+  /** Invidious format ID; permits retrying via the instance media proxy. */
+  itag?: string;
   mimeType: string;
   codec?: string;
   bitrate: number;
