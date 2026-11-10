@@ -114,6 +114,23 @@ describe("decoded-audio preparation", () => {
     expect(invidious.health.find((h) => h.url === result.instance)?.audioCooldown).toBe(0);
   });
 
+
+  it("accepts a companion-proxied media URL hosted outside the Invidious API domain", async () => {
+    vi.spyOn(invidious, "at").mockImplementation(async (_host,path) =>
+      path.includes("local=true")
+        ? info(["https://companion.test/videoplayback?itag=140"])
+        : info(["https://googlevideo.test/blocked"]),
+    );
+    vi.stubGlobal("fetch",vi.fn(async()=>new Response("",{status:403})));
+    const probe=vi.fn(async (s) => {
+      if(s.url.includes("/blocked"))
+        throw new PlaybackError("network_or_cors","opaque","probe");
+    });
+    const result=await new StreamResolver(()=>"probably",probe)
+      .prepare("M7lc1UVf-VE",emptyData().settings);
+    expect(result.stream.url).toContain("companion.test");
+  });
+  
   it("uses local latest_version with the selected itag if API-local URLs are unusable", async () => {
     const direct = { ...info(["https://audio.test/broken"]), audioStreams: [
       { url: "https://audio.test/broken", mimeType: "audio/mp4", bitrate: 128000, itag: "140" },

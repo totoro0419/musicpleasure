@@ -288,7 +288,7 @@ export class StreamResolver {
           }
           if (proxyInfo) {
             const localStreams = streamsFrom(proxyInfo)
-              .filter((s) => s.url.startsWith(h.url + "/"))
+              .filter((s) => !direct.some((original) => original.url === s.url))
               .slice(0, 2);
             for (const stream of localStreams) {
               const playable = await attempt(stream);
