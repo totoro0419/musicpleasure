@@ -22,6 +22,7 @@ export function TrackList({
   reorder,
   onRemove,
   queue = false,
+  singlePlay = false,
 }: {
   tracks: Track[];
   onAdd?: (ids: string[]) => void;
@@ -30,6 +31,7 @@ export function TrackList({
   reorder?: (from: number, to: number) => void;
   onRemove?: (index: number) => void;
   queue?: boolean;
+  singlePlay?: boolean;
 }) {
   const { data } = useStore();
   const parent = useRef<HTMLDivElement>(null);
@@ -127,8 +129,8 @@ export function TrackList({
                         position: 0,
                       }));
                       void store.playCurrent();
-                    } else
-                      store.playList(
+                    } else if (singlePlay) store.playList([t.id], 0, true);
+                      else store.playList(
                         tracks.map((t) => t.id),
                         row.index,
                       );
@@ -148,8 +150,8 @@ export function TrackList({
                           position: 0,
                         }));
                         void store.playCurrent();
-                      } else
-                        store.playList(
+                      } else if (singlePlay) store.playList([t.id], 0, true);
+                        else store.playList(
                           tracks.map((t) => t.id),
                           row.index,
                         );

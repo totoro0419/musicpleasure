@@ -143,13 +143,19 @@ export const store = {
         : [...d.queue, ...ids],
     }));
   },
-  playList(ids: string[], index = 0) {
+  playList(ids: string[], index = 0, disableRadio = false) {
     radioAbort?.abort();
     radioEpoch++;
     radioPending = undefined;
     let queue = [...ids];
     if (data.shuffle) queue = shuffleTail(queue, index);
-    this.update((d) => ({ ...d, queue, current: index, position: 0 }));
+    this.update((d) => ({
+      ...d,
+      queue,
+      current: index,
+      position: 0,
+      radio: disableRadio ? false : d.radio,
+    }));
     void this.playCurrent();
   },
   async playCurrent(position = 0, forceFirst = true) {

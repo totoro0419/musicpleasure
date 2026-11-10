@@ -280,3 +280,30 @@ test("a refused middle song is skipped automatically without stopping the playli
   ).toBe(true);
   expect(diag.excluded[id2].kind).toBe("upstream_rejected");
 });
+
+test("search does not enqueue candidates; tapping a result plays only that track", async ({ page }) => {
+  await mocks(page);
+  await page.goto("./#search");
+  await page.getByLabel("楽曲を検索").fill("Test Cover");
+  await page.getByRole("button", { name: "検索", exact: true }).click();
+  await expect(page.locator(".trackrow")).toHaveCount(2);
+  await goto(page, "queue");
+  await expect(page.locator(".trackrow")).toHaveCount(0);
+
+  await goto(page, "search");
+  await page.getByLabel("楽曲を検索").fill("Test Cover");
+  await page.getByRole("button", { name: "検索", exact: true }).click();
+  await expect(page.locator(".trackrow")).toHaveCount(2);
+  await page.getByRole("button", { name: "Test Cover Bを再生" }).click();
+  await goto(page, "queue");
+  await expect(page.locator(".trackrow")).toHaveCount(1);
+  await expect(page.locator(".trackrow").first()).toContainText("Test Cover B");
+
+  await goto(page, "search");
+  await page.getByLabel("楽曲を検索").fill("Test Cover");
+  await page.getByRole("button", { name: "検索", exact: true }).click();
+  await expect(page.locator(".trackrow")).toHaveCount(2);
+  await page.getByRole("button", { name: "すべて再生", exact: true }).click();
+  await goto(page, "queue");
+  await expect(page.locator(".trackrow")).toHaveCount(2);
+});
