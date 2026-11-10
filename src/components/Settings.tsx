@@ -270,7 +270,7 @@ export function Settings({
           </button>
         </div>
         <p className="muted">
-          公式の公開一覧を自動取得します。API応答成功と音声再生成功は別々に記録します。「未検証」は動作保証を意味しません。
+          通常は自動選択のままで使えます。再生できない場合だけ接続先を変更してください。
         </p>
         <label>
           接続先
@@ -286,6 +286,8 @@ export function Settings({
             ))}
           </select>
         </label>
+        <details className="advanced-instance-list">
+          <summary>接続先の通信状況を詳しく見る</summary>
         <div className="instance-list">
           {invidious.health.map((h) => (
             <div className="instance" key={h.url}>
@@ -316,6 +318,7 @@ export function Settings({
             </div>
           ))}
         </div>
+        </details>
         <details>
           <summary>失敗した段階と一時除外の診断</summary>
           <p className="muted">

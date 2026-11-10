@@ -125,9 +125,9 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
   return (
     <>
       <div className="page-intro">
-        <div className="eyebrow">FIND YOUR SOUND</div>
-        <h1>次の一曲を探そう。</h1>
-        <p>公式曲から、あなたの好きな歌い手まで。</p>
+        <div className="eyebrow">曲を検索</div>
+        <h1>聴きたい曲を探す</h1>
+        <p>曲名・歌い手・YouTube URLで検索できます。</p>
       </div>
       <form
         className="searchform"
@@ -139,7 +139,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
         <SearchIcon size={22} />
         <input
           aria-label="楽曲を検索"
-          placeholder="曲名、歌い手、YouTube URL"
+          placeholder="曲名・歌い手・YouTube URL"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -151,6 +151,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
           {busy ? "検索中…" : "検索"}
         </button>
       </form>
+      <p className="search-help">検索するだけではキューは変わりません。曲をタップするとその1曲を再生します。</p>
       {suggestions.length > 0 && (
         <div className="suggestions">
           {suggestions.slice(0, 6).map((s) => (
@@ -241,7 +242,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
           <h2>
             検索結果 <small>{visible.length}曲</small>
           </h2>
-          <button onClick={() => store.playList(visible.map((t) => t.id), 0, true)}>
+          <button className="search-play-all" title="検索結果の全曲を再生キューに登録します" onClick={() => store.playList(visible.map((t) => t.id), 0, true)}>
             すべて再生
           </button>
         </div>

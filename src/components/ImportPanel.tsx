@@ -123,12 +123,11 @@ export function ImportPanel() {
     <div className="import-layout">
       <section className="panel">
         <div className="eyebrow">
-          <Sparkles size={16} /> SMART IMPORT
+          <Sparkles size={16} /> 曲を一括登録
         </div>
-        <h2>曲一覧を、そのまま音楽に。</h2>
+        <h2>曲のリストをまとめて登録</h2>
         <p className="muted">
-          ChatGPTの回答、箇条書き、曲名＋歌手、YouTube
-          URLに対応。名前があいまいな曲は候補を選べます。
+          曲名やYouTube URLを1行ずつ貼り付けてください。候補を確認してからプレイリストへ追加します。
         </p>
         <label>
           登録先プレイリスト

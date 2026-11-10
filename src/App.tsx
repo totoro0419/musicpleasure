@@ -41,166 +41,71 @@ interface InstallPrompt extends Event {
 }
 const nav = [
   { id: "home", label: "ホーム", icon: Home },
-  { id: "search", label: "検索", icon: SearchIcon },
+  { id: "search", label: "探す", icon: SearchIcon },
   { id: "library", label: "ライブラリ", icon: LibraryIcon },
-  { id: "radio", label: "無限ラジオ", icon: RadioIcon },
-  { id: "import", label: "AI一括登録", icon: Sparkles },
+  { id: "radio", label: "ラジオ", icon: RadioIcon },
+  { id: "import", label: "一括登録", icon: Sparkles },
 ];
 function HomePage({ onAdd }: { onAdd: (ids: string[]) => void }) {
   const { data } = useStore();
+  const recent = data.history
+    .slice(0, 6)
+    .map((id) => data.tracks[id])
+    .filter(Boolean);
   return (
-    <>
-      <div className="home-greeting">
-        <span>YOUR EVERYDAY SOUNDTRACK</span>
-        <span className="quiet-pill">
-          <span className="dot" />
-          あなたの音楽、ひとつに。
-        </span>
-      </div>
-      <section className="hero">
-        <div className="hero-copy">
-          <div className="eyebrow">
-            <AudioLines size={17} /> MUSIC WITHOUT LIMITS
-          </div>
-          <h1>
-            次の一曲に、
-            <br />
-            <span>出会おう。</span>
-          </h1>
-          <p>
-            お気に入りの曲も、まだ知らない歌い手も。
-            <br />
-            好きな音が、ずっとつながる。
-          </p>
-          <div className="actions">
-            <a href="#search" className="primary button">
-              <SearchIcon size={19} />
-              音楽を探す
-            </a>
-            <a href="#radio" className="button ghost">
-              <RadioIcon size={19} />
-              ラジオを始める
-            </a>
-          </div>
-        </div>
-        <div className="hero-art" aria-hidden="true">
-          <div className="orbit orbit-one" />
-          <div className="orbit orbit-two" />
-          <div className="record">
-            <div className="record-label">
-              <AudioLines size={42} />
-              <span>MP / 02</span>
-            </div>
-          </div>
-          <div className="art-caption">
-            FIND YOUR
-            <br />
-            NEXT FAVORITE.
-          </div>
-          <div className="wave">
-            {Array.from({ length: 30 }, (_, i) => (
-              <i key={i} style={{ height: 8 + (Math.sin(i * 1.7) + 1) * 17 }} />
-            ))}
-          </div>
+    <div className="home-dashboard">
+      <section className="home-welcome" aria-labelledby="home-title">
+        <span className="home-kicker"><AudioLines size={17} /> MUSICPLEASURE</span>
+        <h1 id="home-title">次の一曲に、出会おう。</h1>
+        <p>聴きたい曲を検索して、好きな曲だけを再生。
+          <br />プレイリストも、ここからすぐに開けます。</p>
+        <div className="home-primary-actions">
+          <a className="button primary" href="#search"><SearchIcon size={20} /> 曲を検索する <ChevronRight size={18}/></a>
+          <a className="button home-secondary" href="#library"><LibraryIcon size={20} /> プレイリストを見る</a>
         </div>
       </section>
-      <div className="quick-links">
-        <a href="#import">
-          <span className="quick-icon purple">
-            <Sparkles />
-          </span>
-          <div>
-            <b>曲一覧を、まとめて登録</b>
-            <span>ChatGPTのリストを貼り付けるだけ</span>
-          </div>
-          <ChevronRight size={19} />
-        </a>
+      <nav className="home-shortcuts" aria-label="よく使う操作">
         <a href="#radio">
-          <span className="quick-icon cyan">
-            <RadioIcon />
-          </span>
-          <div>
-            <b>好きから広がる、無限ラジオ</b>
-            <span>歌ってみたも、新しい出会いも</span>
+          <span className="shortcut-symbol shortcut-radio"><RadioIcon size={22}/></span>
+          <span><b>無限ラジオ</b><small>好みの曲から自動で再生</small></span>
+          <ChevronRight size={18}/>
+        </a>
+        <a href="#import">
+          <span className="shortcut-symbol shortcut-import"><Sparkles size={22}/></span>
+          <span><b>曲をまとめて登録</b><small>曲名やURLを貼り付ける</small></span>
+          <ChevronRight size={18}/>
+        </a>
+      </nav>
+      <section className="home-section" aria-labelledby="recent-title">
+        <div className="home-section-head">
+          <div><h2 id="recent-title">最近聴いた曲</h2><p>続きを聴きたい曲をすぐに再生</p></div>
+          <a href="#library">ライブラリへ <ChevronRight size={17}/></a>
+        </div>
+        {recent.length ? (
+          <TrackList tracks={recent} onAdd={onAdd} singlePlay />
+        ) : (
+          <div className="home-empty">
+            <span className="home-empty-icon"><Music2 size={26}/></span>
+            <div><b>再生した曲がここに表示されます</b><p>まずは好きな曲を探してみましょう。</p></div>
+            <a className="button" href="#search">曲を探す <ChevronRight size={16}/></a>
           </div>
-          <ChevronRight size={19} />
-        </a>
-      </div>
-      <div className="section-heading">
-        <div>
-          <span className="eyebrow">MADE BY YOU</span>
-          <h2>あなたのプレイリスト</h2>
+        )}
+      </section>
+      <section className="home-section" aria-labelledby="playlists-title">
+        <div className="home-section-head">
+          <div><h2 id="playlists-title">マイプレイリスト</h2><p>自分で保存した曲のコレクション</p></div>
+          <a href="#library">すべて見る <ChevronRight size={17}/></a>
         </div>
-        <a href="#library">
-          すべて見る <ChevronRight size={15} />
-        </a>
-      </div>
-      <div className="playlist-grid">
-        {data.playlists.slice(0, 5).map((p) => (
-          <PlaylistCard id={p.id} key={p.id} />
-        ))}
-        <a className="create-card" href="#library">
-          <span>
-            <Plus size={30} />
-          </span>
-          <b>新しいプレイリスト</b>
-          <small>好きな曲を集めよう</small>
-        </a>
-      </div>
-      <div className="section-heading">
-        <div>
-          <span className="eyebrow">BACK TO YOUR FAVORITES</span>
-          <h2>最近聴いた曲</h2>
-        </div>
-        <a href="#library">
-          ライブラリへ <ChevronRight size={15} />
-        </a>
-      </div>
-      {data.history.length ? (
-        <TrackList
-          tracks={data.history
-            .slice(0, 6)
-            .map((id) => data.tracks[id])
-            .filter(Boolean)}
-          onAdd={onAdd}
-        />
-      ) : (
-        <div className="history-empty">
-          <AudioLines size={24} />
-          <p>
-            再生した曲がここに並びます。
-            <span>まずは、今聴きたい一曲を見つけよう。</span>
-          </p>
-          <a className="button" href="#search">
-            曲を検索
+        <div className="playlist-grid">
+          {data.playlists.slice(0, 5).map((p) => <PlaylistCard id={p.id} key={p.id}/>)}
+          <a className="create-card" href="#library">
+            <span><Plus size={26}/></span>
+            <b>プレイリストを作る</b>
+            <small>曲をまとめて保存</small>
           </a>
         </div>
-      )}
-      <div className="section-heading">
-        <div>
-          <span className="eyebrow">EXPLORE MORE</span>
-          <h2>気分から、見つける。</h2>
-        </div>
-      </div>
-      <div className="mood-grid">
-        {[
-          ["01", "歌ってみた", "COVER VOICES", "violet"],
-          ["02", "新しい音楽", "FRESH FINDS", "blue"],
-          ["03", "お気に入りに浸る", "ON REPEAT", "teal"],
-        ].map(([n, title, sub, color]) => (
-          <a
-            key={n}
-            href={n === "03" ? "#library" : "#search"}
-            className={`mood-card ${color}`}
-          >
-            <small>{n} / MUSICPLEASURE</small>
-            <h3>{title}</h3>
-            <span>{sub} ↗</span>
-            <AudioLines size={80} />
-          </a>
-        ))}
-      </div>
-    </>
+      </section>
+    </div>
   );
 }
 function NowPlaying({ onAdd }: { onAdd: (ids: string[]) => void }) {
@@ -209,15 +114,15 @@ function NowPlaying({ onAdd }: { onAdd: (ids: string[]) => void }) {
   return (
     <>
       <div className="page-intro">
-        <div className="eyebrow">NOW PLAYING</div>
-        <h1>いま、聴いている音。</h1>
+        <div className="eyebrow">再生中</div>
+        <h1>いま聴いている曲</h1>
       </div>
       {t ? (
         <>
           <section className="nowplaying">
             <img className="album" src={t.thumbnail} alt="" />
             <div>
-              <span className="eyebrow">INVIDIOUS AUDIO</span>
+              <span className="eyebrow">NOW PLAYING</span>
               <h2>{t.title}</h2>
               <p>{t.uploader}</p>
               <p className="muted">
@@ -276,7 +181,10 @@ function NowPlaying({ onAdd }: { onAdd: (ids: string[]) => void }) {
               </label>
             </div>
           </section>
+          <div className="home-section-head"><div><h2>次に再生</h2><p>タップするとその曲に切り替わります</p></div><a href="#queue">キューを見る <ChevronRight size={17}/></a></div>
           <TrackList
+            queue
+            queueOffset={data.current + 1}
             tracks={data.queue
               .slice(data.current + 1)
               .map((id) => data.tracks[id])
@@ -401,10 +309,10 @@ export default function App() {
             <AudioLines size={25} />
           </span>
           <div>
-            MusicPleasure<small>FIND YOUR NEXT FAVORITE</small>
+            MusicPleasure<small>YOUR MUSIC, SIMPLIFIED</small>
           </div>
         </a>
-        <div className="nav-caption">DISCOVER</div>
+        <div className="nav-caption">メニュー</div>
         <nav aria-label="メインナビゲーション">
           {nav.map((n) => (
             <a
@@ -415,16 +323,16 @@ export default function App() {
                   : ""
               }
               href={`#${n.id}`}
-              aria-current={active === n.id ? "page" : undefined}
+              aria-current={active === n.id || (n.id === "library" && active === "playlist") ? "page" : undefined}
             >
               <n.icon size={21} />
               <span>{n.label}</span>
-              {n.id === "import" && <small>NEW</small>}
+              
             </a>
           ))}
         </nav>
         <div className="nav-caption collection-caption">
-          YOUR COLLECTION{" "}
+          プレイリスト{" "}
           <a href="#library" aria-label="プレイリスト作成">
             <Plus size={17} />
           </a>
@@ -462,13 +370,12 @@ export default function App() {
             <Download size={19} />
             アプリをインストール
           </button>
-          <span className="version">MUSICPLEASURE / V2.0</span>
+          <span className="version">MusicPleasure / Invidious</span>
         </div>
       </aside>
       <div className="main-shell">
         <header className="topbar">
           <span className="breadcrumb">
-            MusicPleasure <ChevronRight size={14} />
             <b>
               {nav.find((n) => n.id === active)?.label ||
                 (active === "settings"
@@ -481,6 +388,7 @@ export default function App() {
             </b>
           </span>
           <div className="topbar-actions">
+            <a className="topbar-search" href="#search" aria-label="曲を検索する"><SearchIcon size={18}/><span>曲を検索</span></a>
             <button
               className="icon"
               disabled={!store.canUndo}
@@ -497,7 +405,7 @@ export default function App() {
             >
               <Redo2 size={19} />
             </button>
-            <span className="profile-mark">MP</span>
+            <a href="#settings" className="icon topbar-settings" aria-label="設定"><SettingsIcon size={21}/></a>
           </div>
         </header>
         {!online && (

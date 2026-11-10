@@ -22,22 +22,22 @@ export function Radio({ onAdd }: { onAdd: (ids: string[]) => void }) {
     <>
       <div className="page-intro">
         <div className="eyebrow">
-          <RadioIcon size={16} /> NEVER STOP DISCOVERING
+          <RadioIcon size={16} /> 無限ラジオ
         </div>
-        <h1>好きから、まだ知らない好きへ。</h1>
-        <p>一曲選べば、次の出会いが続いていく。</p>
+        <h1>好きな曲から、次の曲へ</h1>
+        <p>1曲を選ぶと、関連する曲を自動で追加して再生します。</p>
       </div>
       <section className="radio-hero">
         <div className="radio-orbit">
           <RadioIcon size={64} />
         </div>
         <div>
-          <span className="eyebrow">INFINITE RADIO</span>
+          <span className="eyebrow">再生の基準になる曲</span>
           <h2>{seed ? seed.title : "あなたの好きな一曲から。"}</h2>
           <p>
             {seed
               ? `${seed.uploader} を基準におすすめ`
-              : "検索結果の「•••」から、この曲からラジオを選んでください。"}
+              : "検索画面で曲の「その他の操作」から「この曲からラジオ」を選んでください。"}
           </p>
           <div className="actions">
             <button
@@ -130,6 +130,7 @@ export function Radio({ onAdd }: { onAdd: (ids: string[]) => void }) {
                 .filter(Boolean)
         }
         onAdd={onAdd}
+        onPlay={(track) => { void store.startRadio(track); }}
       />
       {data.radio && (
         <button onClick={() => void store.fillRadio()}>キューを補充する</button>
