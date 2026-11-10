@@ -9,6 +9,7 @@ import { healthRead, healthSave } from "./storage";
 import { fromItem } from "./model";
 import { PlaybackError, classify, reliability } from "./reliability";
 const seed = [
+  "https://pipedapi.treffler.cloud",
   "https://pipedapi.ducks.party",
   "https://api.piped.private.coffee",
   "https://pipedapi.kavin.rocks",
