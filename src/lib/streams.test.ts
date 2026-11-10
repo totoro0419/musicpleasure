@@ -169,7 +169,7 @@ describe("decoded-audio preparation", () => {
     );
     await r.prepare("id", emptyData().settings);
     await r.prepare("id", emptyData().settings);
-    expect(at.mock.calls.length).toBe(4);
+    expect(at.mock.calls.filter(([url]) => url.includes("one")).length).toBe(2);
   });
   it("treats unsupported codecs as different from a Invidious-wide outage", async () => {
     vi.spyOn(invidious, "at").mockResolvedValue(info());

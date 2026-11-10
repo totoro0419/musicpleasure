@@ -347,7 +347,7 @@ export function Settings({
             }}
           >
             {JSON.stringify(
-              { events: reliability.events, excluded: reliability.excluded, starts: player.metrics },
+              { events: reliability.events, excluded: reliability.excluded, starts: player.metrics, media: { time: player.audio.currentTime, duration: player.audio.duration, paused: player.audio.paused, ended: player.audio.ended, seeking: player.audio.seeking, ready: player.audio.readyState, network: player.audio.networkState, currentTrack: player.state.trackId, status: player.state.status } },
               null,
               2,
             )}

@@ -122,7 +122,7 @@ export class InvidiousClient{
  async at<T>(url:string,path:string,signal?:AbortSignal,timeout=4500):Promise<T>{
   const started=performance.now(),video=path.startsWith("/api/v1/videos/");
   try{
-   const r=await fetch(url+path,{credentials:"omit",signal:signal?
+   const r=await fetch(url+path,{credentials:"omit",...(video?{cache:"no-store" as RequestCache}:{}),signal:signal?
      AbortSignal.any([signal,AbortSignal.timeout(timeout)]):AbortSignal.timeout(timeout)});
    const raw=await r.text();
    let data:Raw;

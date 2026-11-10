@@ -31,9 +31,10 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
       (await page.getByTestId("playback-diagnostics").textContent()) || "{}",
     );
   };
-  async function progresses() {
+  async function progresses(expectedId?: string) {
     const mini = page.locator(".mini-track");
     await expect(mini).toContainText("再生中", { timeout: 32000 });
+    if (expectedId) await expect(mini).toHaveAttribute("data-track-id", expectedId);
     const slider = page.getByLabel("再生位置", { exact: true });
     // A track switch resets the seek position (e.g. 214s -> 0s).
     // Measure advancing audio *after* the reset instead of comparing against
@@ -42,6 +43,7 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
     let accumulated = 0;
     await expect.poll(async () => {
       const status = await mini.innerText();
+      if (expectedId && await mini.getAttribute("data-track-id") !== expectedId) throw Error("Expected track was skipped or replaced before its audio progressed: " + expectedId);
       const position = Number(await slider.inputValue());
       if (!status.includes("再生中") || !Number.isFinite(position)) {
         previous = Number.NaN;
@@ -112,6 +114,7 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
         row.error = String(e).slice(0, 300);
       }
       const diag = await diagnostics();
+      row.start = diag.starts?.find((s: { id: string; at: number }) => s.id === t.id && s.at >= started);
       const events = diag.events.filter(
         (e: { trackId: string; at: number }) =>
           e.trackId === t.id && e.at >= started,
@@ -201,7 +204,7 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
           .click();
         for (let i = 0; i < 3; i++) {
           await expect(page.locator(".mini-track")).toHaveAttribute("data-track-id", good[i], { timeout: 32000 });
-          await progresses();
+          await progresses(good[i]);
           if (i < 2)
             await page.getByLabel("再生位置", { exact: true }).press("End");
         }
@@ -232,6 +235,7 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
     report.diagnostics = await diagnostics();
   } catch (e) {
     errors.push(String(e));
+    report.diagnostics = await diagnostics().catch(() => ({}));
   } finally {
     await mkdir("test-results", { recursive: true });
     const name = "invidious-live-" + info.project.name;

@@ -171,7 +171,12 @@ export class StreamResolver {
         signal.throwIfAborted();
         const jobs = candidates.slice(offset, offset + 3).map((h, index) => ({
           index,
-          job: invidious.at<StreamInfo>(h.url, `/api/v1/videos/${id}`, signal, 4000).then(
+          job: (async () => {
+            // Give the best observed audio server a short head start. A fast API
+            // on a server with broken audio must not win every acquisition race.
+            if (index) await withAbort(new Promise<void>(r => setTimeout(r, index * 150)), signal);
+            return invidious.at<StreamInfo>(h.url, `/api/v1/videos/${id}`, signal, 4000);
+          })().then(
             (info) => ({ index, h, info, error: undefined }),
             (error) => ({
               index,
@@ -221,7 +226,7 @@ export class StreamResolver {
             tried.add(stream.url);
             try {
               signal.throwIfAborted();
-              const buffer = await this.probe(stream, signal);
+              const buffer = await this.probe(stream, AbortSignal.any([signal, AbortSignal.timeout(3000)]));
               signal.throwIfAborted();
               const prepared: PreparedAudio = {
                 id, instance: h.url, info, stream, at: Date.now(), checked: "decoded", buffer: buffer || undefined,
@@ -313,7 +318,7 @@ export class StreamResolver {
           }
 
           // Alternative local proxy endpoint for servers that support it.
-          const preferredItags = direct.filter((s) => s.itag).slice(0, 1);
+          const preferredItags = direct.filter((s, i, all) => s.itag && all.findIndex(x => x.itag === s.itag) === i).slice(0, 2);
           for (const source of preferredItags) {
             const u = new URL("/latest_version", h.url);
             u.searchParams.set("id", id);
