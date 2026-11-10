@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { StreamResolver } from "./streams";
 import { invidious } from "./invidious";
-import { PlaybackError } from "./reliability";
+import { PlaybackError, reliability } from "./reliability";
 import { emptyData } from "./model";
 const info = (urls = ["https://audio.test/a"]) => ({
   title: "Track",
@@ -92,8 +92,69 @@ describe("decoded-audio preparation", () => {
     expect((await r.prepare("id", emptyData().settings)).stream.url).toContain(
       "/ok",
     );
-    expect(invidious.health[0].lastAudioError).toContain("403");
+    expect(reliability.events.some((e) => e.trackId === "id" && e.detail.includes("403"))).toBe(true);
+    expect(invidious.health[0].audioCooldown).toBe(0);
   });
+
+  it("recovers through Invidious local proxy after the normal audio URL fails", async () => {
+    const at = vi.spyOn(invidious, "at").mockImplementation(async (host, path) =>
+      path.includes("local=true")
+        ? info([host + "/videoplayback?itag=140"])
+        : info(["https://audio.test/blocked"]),
+    );
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 403 })));
+    const probe = vi.fn(async (s) => {
+      if (s.url.includes("/blocked"))
+        throw new PlaybackError("network_or_cors", "opaque", "probe");
+    });
+    const resolver = new StreamResolver(() => "probably", probe);
+    const result = await resolver.prepare("M7lc1UVf-VE", emptyData().settings);
+    expect(result.stream.url).toContain("/videoplayback");
+    expect(result.checked).toBe("decoded");
+    expect(at.mock.calls.some(([,p]) => p.includes("?local=true"))).toBe(true);
+    expect(invidious.health.find((h) => h.url === result.instance)?.audioCooldown).toBe(0);
+  });
+
+
+  it("accepts a companion-proxied media URL hosted outside the Invidious API domain", async () => {
+    vi.spyOn(invidious, "at").mockImplementation(async (_host,path) =>
+      path.includes("local=true")
+        ? info(["https://companion.test/videoplayback?itag=140"])
+        : info(["https://googlevideo.test/blocked"]),
+    );
+    vi.stubGlobal("fetch",vi.fn(async()=>new Response("",{status:403})));
+    const probe=vi.fn(async (s) => {
+      if(s.url.includes("/blocked"))
+        throw new PlaybackError("network_or_cors","opaque","probe");
+    });
+    const result=await new StreamResolver(()=>"probably",probe)
+      .prepare("M7lc1UVf-VE",emptyData().settings);
+    expect(result.stream.url).toContain("companion.test");
+  });
+  
+  it("uses local latest_version with the selected itag if API-local URLs are unusable", async () => {
+    const direct = { ...info(["https://audio.test/broken"]), audioStreams: [
+      { url: "https://audio.test/broken", mimeType: "audio/mp4", bitrate: 128000, itag: "140" },
+    ] };
+    vi.spyOn(invidious, "at").mockResolvedValue(direct);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", {status:403})));
+    const r = new StreamResolver(() => "probably", async (s) => {
+      if (s.url.includes("audio.test"))
+        throw new PlaybackError("network_or_cors", "opaque", "probe");
+    });
+    const prepared = await r.prepare("M7lc1UVf-VE", emptyData().settings);
+    expect(prepared.stream.url).toContain("/latest_version");
+    expect(new URL(prepared.stream.url).searchParams.get("local")).toBe("true");
+    expect(new URL(prepared.stream.url).searchParams.get("itag")).toBe("140");
+  });
+
+  it("does not request a proxy when a normal audio URL already decodes", async () => {
+    const at = vi.spyOn(invidious, "at").mockResolvedValue(info());
+    const r = new StreamResolver(() => "probably", async () => {});
+    await r.prepare("M7lc1UVf-VE", emptyData().settings);
+    expect(at.mock.calls.some(([,p]) => p.includes("?local=true"))).toBe(false);
+  });
+
   it("does not use expired signed URLs from the prepared cache", async () => {
     const at = vi
       .spyOn(invidious, "at")

@@ -16,6 +16,7 @@ describe("Invidious normalization",()=>{
   expect(info.title).toBe("Cover A");
   expect(info.duration).toBe(200);
   expect(info.audioStreams[0].bitrate).toBe(128000);
+  expect(info.audioStreams[0].itag).toBeUndefined();
   expect(info.videoStreams?.[0].videoOnly).toBe(false);
   expect(info.relatedStreams[0].url).toContain("M7lc1UVf-VE");
  });
@@ -47,6 +48,21 @@ describe("Invidious HTTP and fallback",()=>{
   const result=await c.at<ReturnType<typeof normalizeVideo>>("https://first.test","/api/v1/videos/"+videoId);
   expect(result.audioStreams[0].url).toBe("https://audio.test/ok");
  });
+
+ it("preserves the video id for local proxy API requests", async () => {
+  const c=new InvidiousClient();c.health=[health("https://first.test")];
+  vi.spyOn(c,"record").mockImplementation(()=>{});
+  vi.stubGlobal("fetch",vi.fn(async()=>new Response(JSON.stringify({
+    ...video,videoId:undefined,
+    adaptiveFormats:[{itag:"140",url:"/videoplayback?itag=140",type:"audio/mp4"}],
+  }),{status:200})));
+  const result=await c.at<ReturnType<typeof normalizeVideo>>(
+    "https://first.test", "/api/v1/videos/"+videoId+"?local=true");
+  expect(result.audioStreams[0].itag).toBe("140");
+  expect(result.audioStreams[0].url).toBe("https://first.test/videoplayback?itag=140");
+  expect(result.thumbnailUrl).toContain(videoId);
+ });
+
  it("reaches a working instance after first-instance failure",async()=>{
   const c=new InvidiousClient();c.health=[health("https://bad.test"),health("https://good.test")];
   vi.spyOn(c,"record").mockImplementation(()=>{});
