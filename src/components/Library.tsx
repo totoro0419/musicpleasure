@@ -39,11 +39,13 @@ export function Library({
   onAdd,
   initialTab = "playlists",
   initialPlaylistUrl,
+  initialTarget,
 }: {
   id?: string;
   onAdd: (ids: string[]) => void;
   initialTab?: "playlists" | "local" | "import";
   initialPlaylistUrl?: string;
+  initialTarget?: string;
 }) {
   const { data } = useStore();
   const [name, setName] = useState("");
@@ -280,7 +282,7 @@ export function Library({
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <a className="button" href="#import">
+          <a className="button" href={`#import/target/${encodeURIComponent(p.id)}`}>
             <Plus size={17} />
             一括登録
           </a>
@@ -430,7 +432,7 @@ export function Library({
         />
       )}
       {tab === "local" && <LocalLibrary onAdd={onAdd} />}
-      {tab === "import" && <ImportPanel initialPlaylistUrl={initialPlaylistUrl} />}
+      {tab === "import" && <ImportPanel initialPlaylistUrl={initialPlaylistUrl} initialTarget={initialTarget} />}
     </>
   );
 }

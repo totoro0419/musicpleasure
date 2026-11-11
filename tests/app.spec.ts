@@ -72,6 +72,29 @@ test("library / URL import / persistence / undo / command preview", async ({
   await page.getByRole("button", { name: "この変更を実行" }).click();
   await expect(page.getByRole("status")).toContainText("変更しました");
 });
+test("bulk import from a playlist selects that playlist even when another one was created first", async ({ page }) => {
+  await mocks(page);
+  await page.goto("./#library");
+  for (const name of ["First list", "Import destination"]) {
+    await page.getByLabel("新しいプレイリスト名").fill(name);
+    await page.getByRole("button", { name: "作成", exact: true }).click();
+    await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+    if (name === "First list") await goto(page, "library");
+  }
+  await page.getByRole("link", { name: "一括登録", exact: true }).click();
+  await expect(page.getByLabel("登録先プレイリスト")).toHaveValue(/.+/);
+  await expect(page.getByLabel("登録先プレイリスト").locator("option:checked")).toHaveText("Import destination");
+  await page.getByLabel("曲一覧", { exact: true }).fill(`https://youtu.be/${id1}`);
+  await page.getByRole("button", { name: "検索・照合する" }).click();
+  await expect(page.getByText(/確定 1/)).toBeVisible();
+  await page.getByRole("button", { name: "確定した曲を登録" }).click();
+  await expect(page.getByText(/1曲を登録しました/)).toBeVisible();
+  await goto(page, "library");
+  const cards = page.locator(".playlist-card");
+  await expect(cards.filter({ hasText: "First list" })).toContainText("0曲");
+  await expect(cards.filter({ hasText: "Import destination" })).toContainText("1曲");
+});
+
 test("search and queue preserve video identity", async ({ page }) => {
   await mocks(page);
   await page.goto("./#search");

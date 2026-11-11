@@ -8,10 +8,13 @@ import {
 import { playlistId } from "../lib/model";
 import { fetchPlaylist, playlistJob } from "../lib/playlist-import";
 import type { Track } from "../types";
-export function ImportPanel({ initialPlaylistUrl = "" }: { initialPlaylistUrl?: string }) {
+export function ImportPanel({ initialPlaylistUrl = "", initialTarget }: {
+  initialPlaylistUrl?: string;
+  initialTarget?: string;
+}) {
   const { data } = useStore();
   const [text, setText] = useState("");
-  const [target, setTarget] = useState(data.playlists[0]?.id || "");
+  const [target, setTarget] = useState(initialTarget ?? data.playlists[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
   const [registering, setRegistering] = useState(false);
   const registration = useRef(false);

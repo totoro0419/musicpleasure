@@ -335,7 +335,10 @@ export default function App() {
     }).catch(() => store.notify("データを保存できず更新を中断しました。バックアップ後に再試行してください。"));
   }
   const current = data.tracks[data.queue[data.current]];
-  const active = route.split("/")[0];
+  const [active, routeId, importTarget] = route.split("/");
+  const targetPlaylist = active === "import" && routeId === "target"
+    ? data.playlists.find((playlist) => encodeURIComponent(playlist.id) === importTarget)?.id || ""
+    : undefined;
   const navigationActive = ["local", "import", "playlist"].includes(active) ? "library" : active;
   const repeatIcon = data.repeat === "one" ? Repeat1 : Repeat;
   const RepeatIcon = repeatIcon;
@@ -498,8 +501,9 @@ export default function App() {
           ) : ["library", "playlist", "local", "import"].includes(active) ? (
             <Library
               key={route}
-              id={active === "playlist" ? route.split("/")[1] : undefined}
-              initialPlaylistUrl={active === "import" && route.includes("/") ? "https://www.youtube.com/playlist?list=" + route.split("/")[1] : undefined}
+              id={active === "playlist" ? routeId : undefined}
+              initialPlaylistUrl={active === "import" && routeId && targetPlaylist === undefined ? "https://www.youtube.com/playlist?list=" + routeId : undefined}
+              initialTarget={targetPlaylist}
               initialTab={active === "local" ? "local" : active === "import" ? "import" : "playlists"}
               onAdd={onAdd}
             />
