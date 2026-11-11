@@ -2796,3 +2796,309 @@ html[data-theme="light"] .player-restore { background: var(--footer); color: var
   .mobile-nav { justify-content: stretch; }
   .mobile-nav > a { flex: 1 1 25%; }
 }
+
+
+/* MusicPleasure — Aurora Pulse brand system
+ * Visual treatment remains CSS-only; no heavy canvas, video, or animation loop.
+ */
+:root {
+  --bg: #080d1b;
+  --sidebar: #0a1122;
+  --panel: #101a2d;
+  --panel-hover: #1b2943;
+  --input: #0a1326;
+  --footer: #0c1326;
+  --text: #edf5ff;
+  --muted: #9badc5;
+  --border: #abc0f020;
+  --accent: #29e2e2;
+  --purple: #b481ff;
+  --brand-gradient: linear-gradient(110deg, #24ebdc 0%, #2eb4ff 49%, #be6cff 100%);
+  --brand-surface: linear-gradient(125deg, #121e37 2%, #101a30 62%, #1a1234 100%);
+}
+body {
+  background:
+    radial-gradient(ellipse 45% 28% at 91% 0%, #6134b617, transparent 75%),
+    radial-gradient(ellipse 44% 24% at 9% 20%, #0585a814, transparent 78%),
+    var(--bg);
+  color: var(--text);
+}
+.brand { gap: 11px; align-items: center; }
+.brand > .brand-mark {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  flex: none;
+  background: none;
+  border-radius: 15px;
+  box-shadow: 0 4px 25px #12c7d723;
+}
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 15px;
+}
+.brand > .brand-wordmark {
+  min-width: 0;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -.055em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.brand-wordmark > span {
+  background: var(--brand-gradient);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+.brand-wordmark small {
+  color: #9bafd3;
+  font-size: 8px;
+  letter-spacing: .11em;
+  margin-top: 6px;
+  font-weight: 700;
+}
+.sidebar {
+  background: linear-gradient(180deg, #0c1529 0%, #09101f 70%, #0b1024 100%);
+  border-right-color: #79abdb1c;
+  box-shadow: 5px 0 42px #0307152a;
+}
+.sidebar nav a.active {
+  background: linear-gradient(100deg, #25cfdb20, #a17aff17);
+  color: #a4f8f5;
+  border: 1px solid #36d6e62f;
+}
+.sidebar nav a.active:before { background: var(--brand-gradient); }
+.sidebar-playlists > a:hover { color: #e3eeff; background: #a0a8ff13; }
+.topbar {
+  background: linear-gradient(110deg, #0b1427f4, #100f27f3);
+  border-bottom-color: #94a8e026;
+}
+.topbar-search {
+  background: #16243acc;
+  border-color: #8bc9ef53;
+}
+.topbar-search:hover { box-shadow: 0 0 0 2px #23dddc1f; }
+.page-intro h1 { font-weight: 800; letter-spacing: -.045em; }
+.page-intro .eyebrow { color: #5ee6e5; font-weight: 800; }
+.panel {
+  background: linear-gradient(150deg, #131e33, #101829);
+  border: 1px solid #86a9df21;
+  box-shadow: inset 0 1px #ffffff04, 0 6px 20px #00000010;
+}
+.panel:hover { border-color: #8ebbf034; }
+.primary {
+  background: var(--brand-gradient);
+  color: #06172a;
+  border: 0;
+  box-shadow: 0 6px 24px #28c6e528;
+  font-weight: 800;
+}
+.primary:hover {
+  background: linear-gradient(110deg, #72f8e9, #79cafa 50%, #d99eff);
+  box-shadow: 0 8px 26px #2fd3df35;
+  color: #06172a;
+}
+button, .button { border-radius: 11px; }
+button:focus-visible, a:focus-visible, summary:focus-visible {
+  outline: 2px solid #6eebf0;
+  outline-offset: 3px;
+}
+input:focus, select:focus, textarea:focus { outline-color: #65dceeb0; }
+.chips button.selected,
+.chips .selected {
+  background: linear-gradient(110deg, #2ed6e92b, #ad70fa2a);
+  border-color: #70bde67d;
+  color: #ddfcff !important;
+}
+.home-welcome {
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 340px;
+  background:
+    radial-gradient(ellipse 65% 100% at 95% 10%, #783cbb36, transparent 70%),
+    radial-gradient(ellipse 65% 80% at 5% 110%, #089db33a, transparent 75%),
+    var(--brand-surface);
+  border: 1px solid #a5b9fa4b;
+  box-shadow: 0 18px 55px #03040e49, inset 0 1px #b4e8ff25;
+}
+.home-welcome:before {
+  content: "";
+  position: absolute;
+  width: 490px;
+  height: 490px;
+  border-radius: 50%;
+  top: -330px;
+  right: -180px;
+  border: 1px solid #9b86fc4a;
+  pointer-events: none;
+}
+.home-welcome:after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 3px;
+  opacity: .8;
+  background: var(--brand-gradient);
+}
+.home-welcome > :not(.hero-visual) {
+  position: relative;
+  z-index: 2;
+}
+.home-welcome h1 {
+  max-width: 650px;
+  font-size: clamp(31px, 4vw, 48px);
+  text-wrap: balance;
+  text-shadow: 0 2px 24px #0006;
+}
+.home-welcome p { max-width: 600px; color: #c4d4ee; }
+.home-kicker { gap: 10px; color: #a4f4f4; font-size: 10px; letter-spacing: .11em; }
+.home-kicker img { width: 28px; height: 28px; }
+.home-kicker-dot { color: #cb9cff; font-size: 7px; }
+.hero-visual {
+  position: absolute;
+  z-index: 0;
+  right: 3%;
+  top: 50%;
+  width: 295px;
+  height: 295px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.hero-visual > img {
+  width: 53%;
+  height: 53%;
+  border-radius: 30px;
+  box-shadow: 0 18px 66px #07061585, 0 0 44px #3cbee43c;
+  position: relative;
+  z-index: 2;
+  transform: rotate(-7deg);
+}
+.hero-halo { position: absolute; border-radius: 50%; }
+.hero-halo-outer {
+  inset: 4%;
+  border: 1px solid #7d86fe66;
+  box-shadow: 0 0 46px #6342fa1e, inset 0 0 42px #12c6eb12;
+}
+.hero-halo-inner {
+  inset: 16%;
+  border: 2px solid #36dbed8c;
+  box-shadow: 0 0 36px #1cdef35c, inset 0 0 50px #9c4cfe26;
+}
+.home-shortcuts > a {
+  background: linear-gradient(120deg, #15223b, #171b35);
+  border: 1px solid #91a9ed2d;
+  box-shadow: inset 0 1px #ffffff08;
+}
+.home-shortcuts > a:hover {
+  background: linear-gradient(120deg, #1b314a, #292045);
+  border-color: #80b8f779;
+}
+.shortcut-radio { color: #69f5ed; background: linear-gradient(140deg, #23def72c, #2b7ef32b); }
+.shortcut-import { color: #e0b5ff; background: linear-gradient(140deg, #8154fb36, #c564ff25); }
+.home-section-head h2 { letter-spacing: -.035em; }
+.playlist-card .playlist-art { box-shadow: 0 12px 28px #03081345; }
+.playlist-card:hover .playlist-art { box-shadow: 0 14px 33px #28125e55; }
+.card-play, .play-toggle {
+  background: var(--brand-gradient);
+  color: #071829;
+  box-shadow: 0 0 0 3px #9de8fb28, 0 4px 19px #38bafb37;
+}
+.play-toggle:hover { background: linear-gradient(110deg, #8affef, #95b5ff, #e1a7ff); }
+.trackrow.active { background: linear-gradient(90deg, #21e2dc15, #9359ec11); border-color: #78e9f34d; }
+.trackrow:hover { background: #597db71a; }
+.tracktext .title:hover { color: #91fff8; }
+.searchform {
+  background: linear-gradient(120deg, #141f36, #17182e);
+  border: 1px solid #7badd960;
+  box-shadow: 0 7px 22px #03030c2b;
+}
+.searchform:focus-within { outline: 2px solid #2ce5e988; }
+.radio-hero {
+  background:
+    radial-gradient(ellipse at 86% 0%, #8354c546, transparent 55%),
+    linear-gradient(120deg, #14243b, #1b1736);
+  border-color: #8b86e455;
+  box-shadow: 0 16px 35px #02071631;
+}
+.playerbar {
+  background: linear-gradient(105deg, #0d182b 0%, #0c1326 57%, #16132e 100%);
+  border-top: 1px solid #8cbaf848;
+  box-shadow: 0 -11px 35px #03061452;
+}
+.playerbar:before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: var(--brand-gradient);
+  opacity: .8;
+  pointer-events: none;
+}
+.player-dismiss, .player-restore { background: #141d35; }
+.player-restore { border-color: #7593ef91; box-shadow: 0 7px 28px #0007, 0 0 26px #7d61ff29; }
+.mini-track small { color: #75e9e5; }
+html[data-theme="light"] {
+  --bg: #f1f5fb;
+  --sidebar: #e8eef8;
+  --panel: #fff;
+  --panel-hover: #e9f0fa;
+  --input: #f5f8fc;
+  --text: #10243a;
+  --muted: #566c84;
+  --footer: #e7eef9;
+  --border: #264b831c;
+  --accent: #147d95;
+}
+html[data-theme="light"] body {
+  background: radial-gradient(ellipse at 90% 0%, #bdb2fd42, transparent 45%), var(--bg);
+}
+html[data-theme="light"] .sidebar {
+  background: linear-gradient(180deg, #edf5ff, #e8edfb);
+  border-color: #aec8ee70;
+}
+html[data-theme="light"] .brand-wordmark > span { background: linear-gradient(110deg,#037f91,#2669c6,#7b42c0);background-clip:text;-webkit-background-clip:text;color:transparent; }
+html[data-theme="light"] .brand-wordmark small { color: #6a7e98; }
+html[data-theme="light"] .topbar { background: #f3f7feef; }
+html[data-theme="light"] .panel { background: #fff; border-color: #adc2e46b; box-shadow: 0 5px 16px #24395b08; }
+html[data-theme="light"] .home-welcome { background: linear-gradient(120deg, #14233e, #161934 77%, #2d1952); }
+html[data-theme="light"] .home-welcome h1 { color: #f0f9ff; }
+html[data-theme="light"] .home-welcome p { color: #c4d4ee; }
+html[data-theme="light"] .home-kicker { color: #b0f9fa; }
+html[data-theme="light"] .home-secondary { background: #f2f8ff24; color: #f3fbff; border-color: #c2cbe46b; }
+html[data-theme="light"] .home-shortcuts > a { background: linear-gradient(125deg, #fff, #f5f2ff); border-color: #b4bfe38f; }
+html[data-theme="light"] .home-shortcuts > a:hover { background: #edf6ff; }
+html[data-theme="light"] .chips button.selected { color: #235484 !important; background: linear-gradient(120deg, #3edfe62b, #b47bff2c); }
+html[data-theme="light"] .searchform { background: #fff; border-color: #9fbde4; }
+html[data-theme="light"] .radio-hero { color: #f2f6ff; }
+html[data-theme="light"] .playerbar { background: #e7edf9; border-color: #96b7e8; }
+html[data-theme="light"] .play-toggle { color: #08172b; background: var(--brand-gradient); }
+html[data-theme="light"] .topbar-search { color: #153c5c; background: #fff; border-color: #94afd4; }
+@media (max-width: 1100px) {
+  .hero-visual { right: -22px; width: 250px; height: 250px; opacity: .75; }
+  .home-welcome h1, .home-welcome p { max-width: 72%; }
+}
+@media (max-width: 800px) {
+  .home-welcome { min-height: 320px; }
+  .hero-visual { right: -20px; width: 200px; height: 200px; top: 29%; opacity: .38; }
+  .home-welcome h1, .home-welcome p { max-width: 100%; }
+  .brand > .brand-mark { width: 44px; height: 44px; }
+  .mobile-nav { background: linear-gradient(105deg,#0b1529,#18132f); border-top-color: #7777b04a; }
+  .mobile-nav > a.active { background: linear-gradient(100deg,#25e0dd20,#bd73fc18); color: #b2faff; }
+}
+@media (max-width: 540px) {
+  .home-welcome { min-height: 330px; }
+  .home-welcome h1 { position: relative; z-index: 2; }
+  .home-kicker { font-size: 9px; letter-spacing: .04em; flex-wrap: wrap; }
+  .hero-visual { right: -36px; top: 24%; width: 168px; height: 168px; opacity: .22; }
+  .home-welcome .home-primary-actions { position: relative; z-index: 3; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-visual img, .playlist-art, .play-toggle, .home-shortcuts > a { transition: none; animation: none; }
+}

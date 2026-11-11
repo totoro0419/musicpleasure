@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  AudioLines,
   Home,
   Search as SearchIcon,
   Library as LibraryIcon,
@@ -53,13 +52,18 @@ function HomePage({ onAdd }: { onAdd: (ids: string[]) => void }) {
   return (
     <div className="home-dashboard">
       <section className="home-welcome" aria-labelledby="home-title">
-        <span className="home-kicker"><AudioLines size={17} /> MUSICPLEASURE</span>
+        <span className="home-kicker"><img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" width="28" height="28" /> MUSICPLEASURE <span className="home-kicker-dot">●</span> DISCOVER YOUR SOUND</span>
         <h1 id="home-title">次の一曲に、出会おう。</h1>
         <p>聴きたい曲を検索して、好きな曲だけを再生。
           <br />プレイリストも、ここからすぐに開けます。</p>
         <div className="home-primary-actions">
           <a className="button primary" href="#search"><SearchIcon size={20} /> 曲を検索する <ChevronRight size={18}/></a>
           <a className="button home-secondary" href="#library"><LibraryIcon size={20} /> プレイリストを見る</a>
+        </div>
+        <div className="hero-visual" aria-hidden="true">
+          <div className="hero-halo hero-halo-outer" />
+          <div className="hero-halo hero-halo-inner" />
+          <img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" width="180" height="180" />
         </div>
       </section>
       <nav className="home-shortcuts" aria-label="よく使う操作">
@@ -325,12 +329,12 @@ export default function App() {
         本文へ移動
       </a>
       <aside className="sidebar">
-        <a className="brand" href="#home">
-          <span>
-            <AudioLines size={25} />
+        <a className="brand" href="#home" aria-label="MusicPleasure ホーム">
+          <span className="brand-mark">
+            <img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" width="46" height="46" />
           </span>
-          <div>
-            MusicPleasure<small>YOUR MUSIC, SIMPLIFIED</small>
+          <div className="brand-wordmark">
+            Music<span>Pleasure</span><small>YOUR SOUND, YOUR SPACE</small>
           </div>
         </a>
         <div className="nav-caption">メニュー</div>

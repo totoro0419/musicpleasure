@@ -463,3 +463,25 @@ test("queue clear requires confirmation and never removes playlists", async ({ p
   await page.getByRole("button", { name: "削除を確定" }).click();
   await expect(page.locator(".trackrow")).toHaveCount(0);
 });
+
+test("Aurora Pulse identity is visible and install icons are valid images", async ({ page }) => {
+  await page.goto("./#home");
+  await expect(page.locator(".home-kicker img")).toBeVisible();
+  await expect(page.locator(".hero-visual img")).toBeVisible();
+  await expect(page.locator(".home-welcome")).toBeVisible();
+  const icons = await page.evaluate(async () => {
+    const paths = ["icon.svg", "icon-192.png", "icon-512.png"];
+    return Promise.all(paths.map(async (path) => {
+      const img = new Image();
+      img.src = new URL(path, document.baseURI).href;
+      await img.decode();
+      return { path, width: img.naturalWidth, height: img.naturalHeight };
+    }));
+  });
+  expect(icons).toEqual([
+    { path: "icon.svg", width: 512, height: 512 },
+    { path: "icon-192.png", width: 192, height: 192 },
+    { path: "icon-512.png", width: 512, height: 512 },
+  ]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+});
