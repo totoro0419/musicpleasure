@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MusicPleasure">
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="MusicPleasure">
 <defs>
  <linearGradient id="aurora" x1="0" y1="0.12" x2="1" y2="0.95"><stop stop-color="#17f3e7"/><stop offset=".48" stop-color="#21baff"/><stop offset="1" stop-color="#c059ff"/></linearGradient>
  <linearGradient id="frame" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#26ece4" stop-opacity=".68"/><stop offset=".5" stop-color="#204ec9" stop-opacity=".27"/><stop offset="1" stop-color="#c36bff" stop-opacity=".7"/></linearGradient>
