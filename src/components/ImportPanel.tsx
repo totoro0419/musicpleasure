@@ -5,13 +5,16 @@ import {
   parseList,
   resolveItem,
 } from "../lib/importer";
-import { playlistId, newPlaylist } from "../lib/model";
+import { playlistId } from "../lib/model";
 import { fetchPlaylist, playlistJob } from "../lib/playlist-import";
+import type { Track } from "../types";
 export function ImportPanel({ initialPlaylistUrl = "" }: { initialPlaylistUrl?: string }) {
   const { data } = useStore();
   const [text, setText] = useState("");
   const [target, setTarget] = useState(data.playlists[0]?.id || "");
   const [busy, setBusy] = useState(false);
+  const [registering, setRegistering] = useState(false);
+  const registration = useRef(false);
   const cancel = useRef<AbortController | null>(null);
   const [playlistURL, setPlaylistURL] = useState(initialPlaylistUrl);
   const job = data.playlistImport;
@@ -21,7 +24,7 @@ export function ImportPanel({ initialPlaylistUrl = "" }: { initialPlaylistUrl?: 
   useEffect(() => () => cancel.current?.abort(), []);
   const items = data.importJob;
   async function run(reset = false) {
-    if (cancel.current) return;
+    if (cancel.current || registration.current) return;
     setError("");
     const work = reset ? parseList(text) : items;
     if (!work.length) {
@@ -52,25 +55,31 @@ export function ImportPanel({ initialPlaylistUrl = "" }: { initialPlaylistUrl?: 
       setBusy(false);
     }
   }
+  async function register(tracks: Track[], name: string) {
+    if (!tracks.length || cancel.current || registration.current) return;
+    registration.current = true;
+    setRegistering(true);
+    setError("");
+    try {
+      const result = store.addPlaylistTracks(target, name, tracks);
+      setTarget(result.id);
+      await store.flush();
+      store.notify(result.added ? `${result.added}曲を登録しました。元に戻すで取り消せます。` : "選択した曲は登録済みです。");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      registration.current = false;
+      setRegistering(false);
+    }
+  }
   function commit() {
     const chosen = items.flatMap((x) =>
       x.selected ? x.candidates.filter((t) => t.id === x.selected) : [],
     );
-    if (!chosen.length || cancel.current) return;
-    store.addTracks(chosen);
-    let id = target;
-    if (!id) {
-      id = store.create("取り込んだ曲");
-      setTarget(id);
-    }
-    store.addToPlaylist(
-      id,
-      chosen.map((t) => t.id),
-    );
-    store.notify(`${chosen.length}曲を登録しました。元に戻すで取り消せます。`);
+    void register(chosen, "取り込んだ曲");
   }
   async function loadPlaylist(resume = false) {
-    if (cancel.current) return;
+    if (cancel.current || registration.current) return;
     setError("");
     const id = playlistId(playlistURL);
     if (!resume && !id) { setError("YouTubeプレイリストURLを入力してください"); return; }
@@ -121,7 +130,7 @@ export function ImportPanel({ initialPlaylistUrl = "" }: { initialPlaylistUrl?: 
         <div className="actions">
           <button
             className="primary"
-            disabled={busy || !text.trim()}
+            disabled={busy || registering || !text.trim()}
             onClick={() => void run(true)}
           >
             <ClipboardPaste size={18} />
@@ -190,7 +199,7 @@ export function ImportPanel({ initialPlaylistUrl = "" }: { initialPlaylistUrl?: 
             </div>
             <button
               className="primary"
-              disabled={busy || !items.some((x) => x.selected)}
+              disabled={busy || registering || !items.some((x) => x.selected)}
               onClick={commit}
             >
               確定した曲を登録
@@ -219,7 +228,7 @@ export function ImportPanel({ initialPlaylistUrl = "" }: { initialPlaylistUrl?: 
           </label>
           <div className="actions">
             <button
-              disabled={busy || !playlistURL}
+              disabled={busy || registering || !playlistURL}
               onClick={() => void loadPlaylist()}
             >
               全ページを自動取得
@@ -240,37 +249,10 @@ export function ImportPanel({ initialPlaylistUrl = "" }: { initialPlaylistUrl?: 
               </div>
               <button
                 className="primary"
-                disabled={busy}
-                onClick={async () => {
-                  store.addTracks(preview);
-                  if (target)
-                    store.addToPlaylist(
-                      target,
-                      preview.map((t) => t.id),
-                    );
-                  else
-                    store.update(
-                      (d) => ({
-                        ...d,
-                        playlists: [
-                          ...d.playlists,
-                          newPlaylist(
-                            playlistName,
-                            preview.map((t) => t.id),
-                          ),
-                        ],
-                      }),
-                      true,
-                    );
-                  try {
-                    await store.flush();
-                    store.notify("取得済みの曲を登録しました");
-                  } catch (error) {
-                    setError(error instanceof Error ? error.message : String(error));
-                  }
-                }}
+                disabled={busy || registering}
+                onClick={() => void register(preview, playlistName)}
               >
-                この{preview.length}曲を取り込む
+                {registering ? "保存中…" : `この${preview.length}曲を取り込む`}
               </button>
             </>
           )}

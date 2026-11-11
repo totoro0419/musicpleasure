@@ -142,4 +142,32 @@ describe("failure-tolerant queue traversal", () => {
     expect(c.load).toHaveBeenCalledTimes(2);
     expect(c.current()).toBe(1);
   });
+  it("does not skip an available song moved into a previously visited position", async () => {
+    const ids = ["good", "bad"];
+    const c = context(ids);
+    const load = c.load;
+    c.load = vi.fn(async (track, position) => {
+      if (track.id === "bad") {
+        ids.reverse();
+        c.select(0);
+      }
+      return load(track, position);
+    });
+    await new QueueTraversal(c).run(1);
+    expect(c.load).toHaveBeenCalledTimes(2);
+    expect(c.queue()[c.current()]).toBe("good");
+  });
+  it("finds the new recommendation after a preceding queue entry was removed", async () => {
+    const ids = ["earlier", "bad"];
+    const c = context(ids);
+    c.select(1);
+    c.replenish = vi.fn(async () => {
+      ids.splice(0, 1);
+      c.select(0);
+      ids.push("good");
+    });
+    await new QueueTraversal(c).run(2);
+    expect(c.load).toHaveBeenCalledTimes(1);
+    expect(c.queue()[c.current()]).toBe("good");
+  });
 });

@@ -78,6 +78,14 @@ test("offline saved audio survives reload and plays three distinct files through
  await page.getByLabel("再生位置",{exact:true}).press("End");
  await expect.poll(async()=>JSON.parse((await page.getByTestId("playback-diagnostics").textContent())||"{}").starts.filter((s:any)=>s.id===repeated).length,{timeout:10000}).toBeGreaterThan(beforeRepeat);
  await page.goto("./#local");
+ const exportEvent = page.waitForEvent("download");
+ await page.locator(".local-management").filter({ hasText: "Offline 1" })
+  .getByRole("button", { name: "音声を書き出す", exact: true }).click();
+ const downloaded = await exportEvent;
+ expect(downloaded.suggestedFilename()).toBe(files[0].name);
+ const hash = createHash("sha256");
+ for await (const chunk of await downloaded.createReadStream()) hash.update(chunk);
+ expect("local-" + hash.digest("hex")).toBe(ids[0]);
  await page.getByRole("button",{name:"音源を削除",exact:true}).first().click();await page.getByRole("button",{name:"削除を確定",exact:true}).click();
  await expect(page.getByText(/音声未保存・元ファイルを再取り込み/)).toBeVisible();
  await page.reload();await expect(page.getByText(/音声未保存・元ファイルを再取り込み/)).toBeVisible();

@@ -43,10 +43,13 @@ test("library / URL import / persistence / undo / command preview", async ({
   await page.getByRole("button", { name: "検索・照合する" }).click();
   await expect(page.getByText(/確定 2/)).toBeVisible();
   await page.getByRole("button", { name: "確定した曲を登録" }).click();
+  await expect(page.getByText("2曲を登録しました。元に戻すで取り消せます。")).toBeVisible();
   await goto(page, "library");
-  await expect(
-    page.locator(".playlist-card").getByText("取り込んだ曲", { exact: true }),
-  ).toBeVisible();
+  await expect(page.locator(".playlist-card")).toHaveCount(1);
+  await page.getByRole("button", { name: "元に戻す", exact: true }).click();
+  await expect(page.locator(".playlist-card")).toHaveCount(0);
+  await page.getByRole("button", { name: "やり直す", exact: true }).click();
+  await expect(page.locator(".playlist-card")).toContainText("取り込んだ曲");
   await page.locator(".playlist-card").click();
   await expect(page.locator(".trackrow")).toHaveCount(2);
   await page.reload();

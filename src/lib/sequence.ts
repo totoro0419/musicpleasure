@@ -24,7 +24,6 @@ export class QueueTraversal {
     const token = ++this.generation;
     this.running = true;
     const attempted = new Set<string>();
-    const visited = new Set<number>();
     let first = true,
       replenished = false,
       last: Track | undefined;
@@ -34,10 +33,9 @@ export class QueueTraversal {
         if (index < 0 || index >= q.length) {
           if (!replenished) {
             replenished = true;
-            const end = q.length;
             await this.context.replenish();
             if (token !== this.generation) return;
-            index = end;
+            index = this.context.current() + 1;
             if (index < this.context.queue().length) continue;
           }
           this.context.exhausted(last, attempted.size);
@@ -45,11 +43,6 @@ export class QueueTraversal {
         }
         const id = q[index],
           track = this.context.track(id);
-        if (visited.has(index)) {
-          this.context.exhausted(last, attempted.size);
-          return;
-        }
-        visited.add(index);
         const duplicate = attempted.has(id);
         attempted.add(id);
         last = track;
@@ -80,11 +73,9 @@ export class QueueTraversal {
         const base =
           selected && currentId === id ? this.context.current() : index;
         index = base + 1;
-        if (index >= currentQueue.length && this.context.wrap()) index = 0;
-        // A finite pass visits each video at most once, including repeat-all/one failures.
-        if (index < currentQueue.length && visited.has(index)) {
-          this.context.exhausted(last, attempted.size);
-          return;
+        if (index >= currentQueue.length && this.context.wrap()) {
+          const remaining = currentQueue.findIndex((id) => !attempted.has(id));
+          if (remaining !== -1) index = remaining;
         }
       }
     } finally {

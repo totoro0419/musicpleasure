@@ -50,20 +50,21 @@ function radioSeed(d: Data) {
 async function waitForRadio() {
   while (data.radio) {
     const epoch = radioEpoch;
-    const size = data.queue.length;
+    const upcoming = new Set(data.queue.slice(data.current + 1));
+    const hasNewSuccessor = () => data.queue.slice(data.current + 1).some((id) => !upcoming.has(id));
     const job = store.fillRadio();
     let change: () => void = () => {};
     try {
       await Promise.race([job, new Promise<void>((resolve) => {
         change = () => {
-          if (epoch !== radioEpoch || data.queue.length > size) resolve();
+          if (epoch !== radioEpoch || hasNewSuccessor()) resolve();
         };
         listeners.add(change);
       })]);
     } finally {
       listeners.delete(change);
     }
-    if (data.queue.length > size || epoch === radioEpoch) return;
+    if (hasNewSuccessor() || epoch === radioEpoch) return;
   }
 }
 let lastPositionSave = 0;
@@ -156,28 +157,20 @@ export const store = {
     this.update((d) => ({ ...d, playlists: [...d.playlists, p] }), true);
     return p.id;
   },
-  addToPlaylist(id: string, ids: string[]) {
-    const playlist = data.playlists.find((p) => p.id === id);
-    if (!playlist) {
-      this.notify("追加先が見つかりません。プレイリストを選び直してください。");
-      return;
-    }
-    ids = unique(ids).filter((id) => data.tracks[id] && !playlist.tracks.includes(id));
-    if (!ids.length) {
-      this.notify("選択した曲はこのプレイリストに登録済みです。");
-      return;
-    }
-    this.update(
-      (d) => ({
-        ...d,
-        playlists: d.playlists.map((p) =>
-          p.id === id ? { ...p, tracks: unique([...p.tracks, ...ids]) } : p,
-        ),
-        additions: { ...d.additions, ...Object.fromEntries(ids.map((id) => [id, (d.additions?.[id] || 0) + 1])) },
-      }),
-      true,
-    );
-    this.notify(`${ids.length}曲をプレイリストへ追加しました`);
+  addPlaylistTracks(target: string, name: string, tracks: Track[]) {
+    const playlist = target ? data.playlists.find((p) => p.id === target) : undefined;
+    if (target && !playlist) throw Error("追加先が見つかりません。プレイリストを選び直してください。");
+    const incoming = new Map(tracks.map((track) => [track.id, track]));
+    const ids = [...incoming.keys()].filter((id) => !playlist?.tracks.includes(id));
+    if (!ids.length) return { id: target, added: 0 };
+    const next = playlist ? { ...playlist, tracks: [...playlist.tracks, ...ids] } : newPlaylist(name, ids);
+    this.update((d) => ({
+      ...d,
+      tracks: { ...Object.fromEntries(incoming), ...d.tracks },
+      playlists: playlist ? d.playlists.map((p) => p.id === target ? next : p) : [...d.playlists, next],
+      additions: { ...d.additions, ...Object.fromEntries(ids.map((id) => [id, (d.additions?.[id] || 0) + 1])) },
+    }), true);
+    return { id: next.id, added: ids.length };
   },
   favorite(id: string) {
     this.update(
@@ -321,6 +314,7 @@ export const store = {
     const index = nextIndex(data, ended);
     if (index < 0) {
       player.stop();
+      if (ended) this.update((d) => ({ ...d, position: 0 }));
       return;
     }
     this.update((d) => ({ ...d, current: index, position: 0 }));
@@ -430,7 +424,7 @@ export const store = {
     else void this.fillRadio();
   },
   async fillRadio() {
-    if (!data.radio || data.queue.length - data.current > 4) return;
+    if (!data.radio || data.queue.length - data.current > 3) return;
     if (radioPending) return radioPending;
     const current = data.tracks[data.queue[data.current]];
     const fixedSeed = ["channel", "versions", "covers"].includes(data.settings.radioMode);
@@ -472,13 +466,15 @@ export const store = {
           if (!active()) return;
         }
         if (!active()) return;
-        radioStatus = added
+        radioStatus = added || data.current + 1 < data.queue.length
           ? { phase: "ready", message: "" }
           : { phase: "error", message: candidates.length
             ? "候補の音声を再生できませんでした。接続を確認して再試行するか、別の基準曲を選んでください。"
             : "次に再生できる曲が見つかりません。別の基準曲やおすすめの方向を選んでください。" };
       } catch (e) {
-        if (active()) radioStatus = { phase: "error", message: e instanceof Error ? e.message : String(e) };
+        if (active()) radioStatus = data.current + 1 < data.queue.length
+          ? { phase: "ready", message: "" }
+          : { phase: "error", message: e instanceof Error ? e.message : String(e) };
       } finally {
         if (active()) emit();
       }
