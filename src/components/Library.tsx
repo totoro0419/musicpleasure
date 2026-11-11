@@ -302,6 +302,7 @@ export function Library({
         <p>プレイリストも、聴いてきた曲も。ここから。</p>
       </div>
       <div className="chips">
+        <a className="button" href="#local">保存した音楽・音声取り込み</a>
         {[
           ["playlists", "プレイリスト"],
           ["favorites", "お気に入り"],

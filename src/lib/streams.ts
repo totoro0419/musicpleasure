@@ -8,14 +8,16 @@ export interface PreparedAudio {
   stream: AudioStream;
   at: number;
   checked: "decoded";
+  buffer?: HTMLAudioElement;
 }
 export async function probeMedia(
   stream: AudioStream,
   signal: AbortSignal,
-): Promise<void> {
+): Promise<HTMLAudioElement> {
   const audio = new Audio();
   audio.muted = true;
   audio.preload = "auto";
+  let readyToKeep = false;
   try {
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -61,10 +63,12 @@ export async function probeMedia(
       audio.load();
       if (audio.readyState >= 2) ready();
     });
+    readyToKeep = true;
+    audio.preload = "metadata";
+    return audio;
   } finally {
     audio.pause();
-    audio.removeAttribute("src");
-    audio.load();
+    if (!readyToKeep) { audio.removeAttribute("src"); audio.load(); }
   }
 }
 export function withAbort<T>(
@@ -94,17 +98,20 @@ export function withAbort<T>(
 }
 export class StreamResolver {
   private cache = new Map<string, PreparedAudio>();
-  private pending = new Map<string, Promise<PreparedAudio>>();
+  private pending = new Map<string, { job: Promise<PreparedAudio>; control: AbortController; users: number }>();
   private badURLs = new Map<string, Map<string, number>>();
   constructor(
     private canPlay: (type: string) => string,
-    private probe = probeMedia,
+    private probe: (stream: AudioStream, signal: AbortSignal) => Promise<HTMLAudioElement | void> = probeMedia,
   ) {}
+  private release(item: PreparedAudio) {
+    if (item.buffer) { item.buffer.pause(); item.buffer.removeAttribute("src"); item.buffer.load(); item.buffer = undefined; }
+  }
   private key(id: string, s: Settings) {
     return `${id}:${s.quality}:${s.instance}`;
   }
   invalidate(id: string, url?: string) {
-    for (const [k, v] of this.cache) if (v.id === id) this.cache.delete(k);
+    for (const [k, v] of this.cache) if (v.id === id) { this.release(v); this.cache.delete(k); }
     if (url) {
       const bad = this.badURLs.get(id) || new Map<string, number>();
       bad.set(url, Date.now() + 60000);
@@ -113,12 +120,13 @@ export class StreamResolver {
   }
   cached(id: string, settings: Settings) {
     const item = this.cache.get(this.key(id, settings));
-    if (!item || Date.now() - item.at > 45000) return;
+    if (!item) return;
+    if (Date.now() - item.at > 300000) { this.release(item); this.cache.delete(this.key(id, settings)); return; }
     try {
       const expires = Number(
         new URL(item.stream.url).searchParams.get("expire"),
       );
-      if (expires && expires * 1000 < Date.now() + 15000) return;
+      if (expires && expires * 1000 < Date.now() + 15000) { this.release(item); this.cache.delete(this.key(id, settings)); return; }
     } catch {
       return;
     }
@@ -128,18 +136,25 @@ export class StreamResolver {
     const ready = this.cached(id, settings);
     if (ready) return ready;
     const key = this.key(id, settings);
-    let job = this.pending.get(key);
-    if (!job) {
-      job = this.resolve(id, settings).finally(() => this.pending.delete(key));
-      this.pending.set(key, job);
+    let entry = this.pending.get(key);
+    if (!entry || entry.control.signal.aborted) {
+      const control = new AbortController();
+      entry = { control, users: 0, job: undefined! };
+      const owned = entry;
+      entry.job = this.resolve(id, settings, control).finally(() => {
+        if (this.pending.get(key) === owned) this.pending.delete(key);
+      });
+      this.pending.set(key, entry);
     }
-    return withAbort(job, signal);
+    entry.users++;
+    try { return await withAbort(entry.job, signal); }
+    finally { if (--entry.users === 0) entry.control.abort(); }
   }
   private async resolve(
     id: string,
     settings: Settings,
+    control: AbortController,
   ): Promise<PreparedAudio> {
-    const control = new AbortController();
     const signal = AbortSignal.any([
       control.signal,
       AbortSignal.timeout(20000),
@@ -156,7 +171,12 @@ export class StreamResolver {
         signal.throwIfAborted();
         const jobs = candidates.slice(offset, offset + 3).map((h, index) => ({
           index,
-          job: invidious.at<StreamInfo>(h.url, `/api/v1/videos/${id}`, signal, 4000).then(
+          job: (async () => {
+            // Give the best observed audio server a short head start. A fast API
+            // on a server with broken audio must not win every acquisition race.
+            if (index) await withAbort(new Promise<void>(r => setTimeout(r, index * 150)), signal);
+            return invidious.at<StreamInfo>(h.url, `/api/v1/videos/${id}`, signal, 4000);
+          })().then(
             (info) => ({ index, h, info, error: undefined }),
             (error) => ({
               index,
@@ -200,19 +220,23 @@ export class StreamResolver {
           ];
           const direct = streamsFrom(info);
           const tried = new Set<string>();
-          const attempt = async (stream: AudioStream): Promise<PreparedAudio | undefined> => {
+          const attempt = async (stream: AudioStream, route: "direct" | "proxy" = "direct"): Promise<PreparedAudio | undefined> => {
             if (tried.has(stream.url) ||
               (this.badURLs.get(id)?.get(stream.url) || 0) >= Date.now()) return;
             tried.add(stream.url);
             try {
               signal.throwIfAborted();
-              await this.probe(stream, signal);
+              const buffer = await this.probe(stream, AbortSignal.any([signal, AbortSignal.timeout(3000)]));
               signal.throwIfAborted();
               const prepared: PreparedAudio = {
-                id, instance: h.url, info, stream, at: Date.now(), checked: "decoded",
+                id, instance: h.url, info, stream, at: Date.now(), checked: "decoded", buffer: buffer || undefined,
               };
               this.cache.set(this.key(id, settings), prepared);
-              if (this.cache.size > 12) this.cache.delete(this.cache.keys().next().value!);
+              if (this.cache.size > 3) {
+                const oldest = this.cache.keys().next().value!;
+                this.release(this.cache.get(oldest)!); this.cache.delete(oldest);
+              }
+              h.mediaRoute = route;
               invidious.audioResult(h.url, "prepared");
               reliability.record({
                 trackId: id, instance: h.url, stage: "probe", outcome: "success",
@@ -224,6 +248,7 @@ export class StreamResolver {
               return prepared;
             } catch (e) {
               if (signal.aborted) throw e;
+              this.invalidate(id, stream.url);
               let error = classify(e, "probe", h.url);
               // A readable HTTP response is stronger evidence than MediaError 4.
               // Limit diagnostic latency so recovery isn't delayed.
@@ -266,11 +291,7 @@ export class StreamResolver {
             continue;
           }
 
-          // Direct audio is fast when it works. Recover via local proxy
-          // before retrying similarly blocked googlevideo URLs.
-          const first = await attempt(direct[0]);
-          if (first) return first;
-
+          const tryProxy = async (): Promise<PreparedAudio | undefined> => {
           let proxyInfo: StreamInfo | undefined;
           try {
             proxyInfo = await invidious.at<StreamInfo>(
@@ -291,21 +312,29 @@ export class StreamResolver {
               .filter((s) => !direct.some((original) => original.url === s.url))
               .slice(0, 2);
             for (const stream of localStreams) {
-              const playable = await attempt(stream);
+              const playable = await attempt(stream, "proxy");
               if (playable) return playable;
             }
           }
 
           // Alternative local proxy endpoint for servers that support it.
-          const preferredItags = direct.filter((s) => s.itag).slice(0, 1);
+          const preferredItags = direct.filter((s, i, all) => s.itag && all.findIndex(x => x.itag === s.itag) === i).slice(0, 2);
           for (const source of preferredItags) {
             const u = new URL("/latest_version", h.url);
             u.searchParams.set("id", id);
             u.searchParams.set("itag", source.itag!);
             u.searchParams.set("local", "true");
-            const playable = await attempt({ ...source, url: u.href });
+            const playable = await attempt({ ...source, url: u.href }, "proxy");
             if (playable) return playable;
           }
+
+            return undefined;
+          };
+          const prefersProxy = h.mediaRoute === "proxy";
+          if (prefersProxy) { const local = await tryProxy(); if (local) return local; }
+          const first = await attempt(direct[0]);
+          if (first) return first;
+          if (!prefersProxy) { const local = await tryProxy(); if (local) return local; }
 
           // A proxy can be unavailable; still try other direct codecs.
           for (const stream of direct.slice(1, 3)) {

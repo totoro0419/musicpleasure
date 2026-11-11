@@ -22,12 +22,14 @@ export const emptyData = (): Data => ({
     discovery: 55,
     weights: { related: 5, favorite: 4, fresh: 3, recent: 8 },
     theme: "dark",
+    prefetch: true,
   },
   searches: [],
   importJob: [],
 });
 export const unique = (ids: string[]) => [...new Set(ids)];
 export const validId = (id: string) => /^[A-Za-z0-9_-]{11}$/.test(id);
+export const localId = (id: string) => /^local-[a-f0-9]{64}$/.test(id);
 export function videoId(input: string): string | null {
   if (validId(input.trim())) return input.trim();
   try {
@@ -143,7 +145,7 @@ export function validateBackup(raw: unknown): Data {
   const tracks: Record<string, Track> = {};
   for (const [id, t] of Object.entries(d.tracks)) {
     if (
-      !validId(id) ||
+      (!validId(id) && !localId(id)) ||
       !t ||
       typeof t.title !== "string" ||
       typeof t.uploader !== "string" ||
@@ -159,6 +161,14 @@ export function validateBackup(raw: unknown): Data {
       duration: t.duration,
       uploaderUrl:
         typeof t.uploaderUrl === "string" ? t.uploaderUrl : undefined,
+      ...(localId(id) ? {
+        source: "local" as const,
+        local: t.local && Number.isFinite(t.local.bytes) && t.local.bytes > 0
+          ? { filename: String(t.local.filename || t.title), bytes: t.local.bytes,
+              mime: String(t.local.mime || "audio/mpeg"), hash: id.slice(6),
+              added: Number(t.local.added) || 0, available: false }
+          : undefined,
+      } : {}),
     };
   }
   const ids = (x: unknown) =>
@@ -185,6 +195,7 @@ export function validateBackup(raw: unknown): Data {
       description: typeof p.description === "string" ? p.description : "",
       cover: safeImage(p.cover),
       favorite: !!p.favorite,
+      created: Number.isFinite(p.created) ? p.created : Date.now(),
     };
   });
   const settings = {
@@ -194,6 +205,7 @@ export function validateBackup(raw: unknown): Data {
   };
   const migratingProvider = d.settings?.engine !== "invidious";
   settings.engine = "invidious";
+  settings.prefetch = d.settings?.prefetch !== false;
   if (
     settings.engine !== "invidious" ||
     !["balanced", "high", "data"].includes(settings.quality) ||
@@ -259,6 +271,7 @@ export function validateBackup(raw: unknown): Data {
     searches: Array.isArray(d.searches)
       ? d.searches.filter((x) => typeof x === "string").slice(0, 30)
       : [],
+    additions: Object.fromEntries(Object.entries(d.additions || {}).filter(([id, n]) => tracks[id] && Number.isFinite(n) && n >= 0)),
   };
 }
 export const time = (s: number) =>

@@ -7,12 +7,13 @@ import {
   nextIndex,
   shuffleTail,
 } from "./model";
-import { readData, saveData } from "./storage";
+import { readData, saveData, storageRevision } from "./storage";
 import { player, type PlaybackState } from "./player";
 import { invidious } from "./invidious";
 import { recommend } from "./recommend";
 import { reliability, classify } from "./reliability";
 import { QueueTraversal } from "./sequence";
+import { reconcileLocal, savedAudio } from "./local-audio";
 let data = emptyData();
 let playback = player.state;
 let notice = "";
@@ -25,8 +26,14 @@ const listeners = new Set<() => void>();
 let radioAbort: AbortController | undefined;
 let radioPending: Promise<void> | undefined;
 let prefetchAbort: AbortController | undefined;
+let prefetchTimer: ReturnType<typeof setTimeout> | undefined;
+function nextPreparedId(d: Data) {
+  const index = nextIndex(d, true);
+  return index < 0 ? "" : d.queue[index] || "";
+}
 let radioEpoch = 0;
 let lastPositionSave = 0;
+let nearEndPrepared = "";
 let previous: Data[] = [];
 let future: Data[] = [];
 function emit() {
@@ -63,6 +70,7 @@ export const store = {
   async init() {
     try {
       data = await readData();
+      data = { ...data, tracks: await reconcileLocal(data.tracks) };
     } catch (e) {
       savingBlocked = true;
       notice = `保存データを読み込めません。元データ保護のため自動保存を停止しました。バックアップの読み込みで復元してください：${e instanceof Error ? e.message : String(e)}`;
@@ -74,14 +82,20 @@ export const store = {
     void invidious.init();
   },
   update(fn: (d: Data) => Data, undo = false) {
+    const oldNext = nextPreparedId(data);
+    const wasRadio = data.radio;
+    const nextData = fn(data);
     if (undo) {
       previous.push(structuredClone(data));
       previous = previous.slice(-30);
       future = [];
     }
-    data = fn(data);
+    data = nextData;
+    if (oldNext !== nextPreparedId(data)) { prefetchAbort?.abort(); clearTimeout(prefetchTimer); }
+    if (wasRadio && !data.radio) { radioEpoch++; radioAbort?.abort(); radioPending = undefined; }
     persist();
     emit();
+    if (oldNext !== nextPreparedId(data) && playback.status === "playing") this.prepareNext();
   },
   enableSaving() {
     savingBlocked = false;
@@ -111,6 +125,7 @@ export const store = {
         playlists: d.playlists.map((p) =>
           p.id === id ? { ...p, tracks: unique([...p.tracks, ...ids]) } : p,
         ),
+        additions: { ...d.additions, ...Object.fromEntries(ids.map((id) => [id, (d.additions?.[id] || 0) + 1])) },
       }),
       true,
     );
@@ -128,7 +143,7 @@ export const store = {
     );
   },
   dislike(id: string) {
-    this.update((d) => ({ ...d, disliked: unique([...d.disliked, id]) }));
+    this.update((d) => ({ ...d, disliked: unique([...d.disliked, id]), queue: d.queue.filter((x, i) => x !== id || i <= d.current) }));
     if (data.queue[data.current] === id) this.next();
   },
   enqueue(ids: string[], next = false) {
@@ -159,24 +174,26 @@ export const store = {
     void this.playCurrent();
   },
   async playCurrent(position = 0, forceFirst = true) {
+    nearEndPrepared = "";
+    listenedId = "";
     prefetchAbort?.abort();
+    clearTimeout(prefetchTimer);
     await traversal.run(data.current, position, forceFirst);
     const id = data.queue[data.current];
     if (player.state.status === "playing" && player.state.trackId === id) {
-      prefetchAbort = new AbortController();
-      const signal = prefetchAbort.signal;
-      const next = data.queue
-        .slice(data.current + 1)
-        .filter((id) => !reliability.isExcluded(id))
-        .slice(0, 2);
-      void (async () => {
-        for (const id of next) {
-          if (signal.aborted) return;
-          await player.prefetch(id, data.settings, signal);
-        }
-      })();
+      this.prepareNext();
       void this.fillRadio();
     }
+  },
+  prepareNext() {
+    clearTimeout(prefetchTimer);
+    prefetchTimer = setTimeout(() => {
+      if (playback.status !== "playing" || navigator.onLine === false || data.settings.prefetch === false) return;
+      const id = nextPreparedId(data);
+      if (!id || data.tracks[id]?.source === "local" || reliability.isExcluded(id)) return;
+      prefetchAbort?.abort(); prefetchAbort = new AbortController();
+      void player.prefetch(id, data.settings, prefetchAbort.signal);
+    }, 350);
   },
   toggle() {
     if (playback.status === "playing" || playback.status === "loading")
@@ -267,8 +284,12 @@ export const store = {
     }));
   },
   settings(patch: Partial<Settings>) {
+    if (patch.radioMode || patch.discovery !== undefined) { radioEpoch++; radioAbort?.abort(); radioPending = undefined; }
+    if (patch.quality || patch.instance !== undefined) { prefetchAbort?.abort(); clearTimeout(prefetchTimer); }
     this.update((d) => ({ ...d, settings: { ...d.settings, ...patch } }));
     invidious.preferred = data.settings.instance;
+    this.prepareNext();
+    if (data.radio && patch.radioMode) void this.fillRadio();
   },
   async startRadio(track: Track) {
     this.addTracks([track]);
@@ -298,21 +319,22 @@ export const store = {
           )
           .slice(0, 8);
         // Decode candidates silently before they become radio queue entries. Metadata alone is insufficient.
-        for (let i = 0; i < pool.length && good.length < 4; i += 2) {
+        for (let i = 0; i < pool.length && good.length < 3; i++) {
           const results = await Promise.all(
-            pool.slice(i, i + 2).map(async (t) => ({
+            pool.slice(i, i + 1).map(async (t) => ({
               t,
-              prepared: await player.prefetch(t.id, data.settings, signal, true),
+              prepared: t.source === "local" ? !!(await savedAudio(t.id)) : await player.prefetch(t.id, data.settings, signal, true),
             })),
           );
           if (signal.aborted || epoch !== radioEpoch || !data.radio) return;
           good.push(...results.filter((x) => x.prepared).map((x) => x.t));
         }
         if (signal.aborted || epoch !== radioEpoch || !data.radio) return;
-        this.addTracks(good);
+        const accepted = good.filter(t => !data.disliked.includes(t.id) && !reliability.isExcluded(t.id));
+        this.addTracks(accepted);
         const existing = new Set(data.queue);
-        this.enqueue(good.map((t) => t.id).filter((id) => !existing.has(id)));
-        if (!good.length)
+        this.enqueue(accepted.map((t) => t.id).filter((id) => !existing.has(id)));
+        if (!accepted.length)
           this.notify(
             "推薦候補は見つかりましたが、再生可能な音源を確認できませんでした。既存のキューは保持しています。",
           );
@@ -358,7 +380,7 @@ const traversal = new QueueTraversal({
   queue: () => data.queue,
   current: () => data.current,
   track: (id) => data.tracks[id],
-  excluded: (id) => reliability.isExcluded(id),
+  excluded: (id) => data.tracks[id]?.source === "local" ? !data.tracks[id]?.local?.available : navigator.onLine === false || reliability.isExcluded(id),
   wrap: () => data.repeat === "all",
   select: (index) =>
     store.update((d) => ({ ...d, current: index, position: 0 })),
@@ -373,7 +395,6 @@ const traversal = new QueueTraversal({
       };
       return {
         ...d,
-        history: unique([t.id, ...d.history]).slice(0, 1000),
         listening: { ...d.listening, [t.id]: { ...stat, last: Date.now() } },
         position,
       };
@@ -434,6 +455,10 @@ reliability.onChange = () => {
 player.onState = (s) => {
   playback = s;
   emit();
+  if (s.status === "playing" && s.duration - s.position < 25 && nearEndPrepared !== s.trackId) {
+    nearEndPrepared = s.trackId;
+    store.prepareNext();
+  }
   if (Date.now() - lastPositionSave > 5000) {
     lastPositionSave = Date.now();
     data = { ...data, position: s.position };
@@ -482,6 +507,7 @@ player.onListen = (seconds) => {
   if (count) counted = true;
   data = {
     ...data,
+    history: data.history[0] === id ? data.history : unique([id, ...data.history]).slice(0, 1000),
     listening: {
       ...data.listening,
       [id]: {
@@ -521,7 +547,7 @@ window.addEventListener("pagehide", () => {
   data = { ...data, position: player.state.position };
   if (!savingBlocked && loaded) {
     try {
-      sessionStorage.setItem("musicpleasure-recovery", JSON.stringify(data));
+      sessionStorage.setItem("musicpleasure-recovery", JSON.stringify({ ...data, __revision: storageRevision() }));
     } catch {}
   }
   void store.flush();

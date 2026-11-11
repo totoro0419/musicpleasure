@@ -2,11 +2,12 @@ import { invidious } from "./invidious";
 import type { Settings, Track } from "../types";
 import { classify, PlaybackError, reliability } from "./reliability";
 import { StreamResolver, type PreparedAudio } from "./streams";
+import { savedAudio } from "./local-audio";
 export type PlaybackStatus =
   "idle" | "loading" | "playing" | "paused" | "blocked" | "error" | "ended";
 export interface PlaybackState {
   status: PlaybackStatus;
-  engine: "invidious" | null;
+  engine: "invidious" | "local" | null;
   position: number;
   duration: number;
   message: string;
@@ -52,6 +53,21 @@ export class MusicPlayer {
   private stallAt = 0;
   private expectedSrc = "";
   private started = false;
+  private objectURL = "";
+  private handlers: Array<[string, EventListener]> = [];
+  private loadStarted = 0;
+  private usedPrefetch = false;
+  metrics: Array<{ id: string; source: string; startMs: number; prefetched: boolean; at: number }> = [];
+  private listen(name: string, handler: EventListener) {
+    this.handlers.push([name, handler]); this.audio.addEventListener(name, handler);
+  }
+  private adopt(audio: HTMLAudioElement) {
+    const volume = this.audio.volume;
+    for (const [name, handler] of this.handlers) this.audio.removeEventListener(name, handler);
+    this.audio.pause(); this.audio.removeAttribute("src"); this.audio.load();
+    this.audio = audio; this.audio.muted = false; this.audio.volume = volume;
+    for (const [name, handler] of this.handlers) this.audio.addEventListener(name, handler);
+  }
   constructor(resolver?: StreamResolver) {
     this.resolver =
       resolver || new StreamResolver((type) => this.audio.canPlayType(type));
@@ -59,7 +75,7 @@ export class MusicPlayer {
     this.audio.volume = 0.8;
     setInterval(() => this.tick(), 500);
     document.addEventListener("visibilitychange", () => this.tick());
-    this.audio.addEventListener("playing", () => {
+    this.listen("playing", () => {
       if (!this.activeSource() || !this.wantsPlay) {
         this.audio.pause();
         return;
@@ -69,7 +85,7 @@ export class MusicPlayer {
       this.stallAt = 0;
       this.armWatchdog(false);
     });
-    this.audio.addEventListener("ended", () => {
+    this.listen("ended", () => {
       if (
         this.activeSource() &&
         this.started &&
@@ -83,17 +99,17 @@ export class MusicPlayer {
         this.onEnded();
       }
     });
-    this.audio.addEventListener("waiting", () => {
+    this.listen("waiting", () => {
       if (this.started) this.armWatchdog();
     });
-    this.audio.addEventListener("error", () => {
+    this.listen("error", () => {
       if (this.activeSource() && this.state.status === "playing")
         void this.recover();
     });
   }
   private activeSource() {
     return (
-      this.state.engine === "invidious" &&
+      !!this.state.engine &&
       !!this.expectedSrc &&
       (this.audio.currentSrc || this.audio.src) === this.expectedSrc
     );
@@ -130,8 +146,12 @@ export class MusicPlayer {
         this.stallAt = 0;
         if (!this.audioConfirmed) {
           this.audioConfirmed = true;
-          invidious.audioSuccess(this.state.instance);
-          reliability.success(this.state.trackId, this.state.instance);
+          if (this.state.engine === "invidious") {
+            invidious.audioSuccess(this.state.instance);
+            reliability.success(this.state.trackId, this.state.instance);
+          }
+          this.metrics.push({ id: this.state.trackId, source: this.state.engine!, startMs: Math.round(performance.now() - this.loadStarted), prefetched: this.usedPrefetch, at: Date.now() });
+          this.metrics = this.metrics.slice(-100);
         }
       } else if (this.stallAt && now - this.stallAt > 12000)
         void this.recover();
@@ -200,6 +220,7 @@ export class MusicPlayer {
     this.audio.pause();
     this.audio.removeAttribute("src");
     this.audio.load();
+    if (this.objectURL) { URL.revokeObjectURL(this.objectURL); this.objectURL = ""; }
     this.armWatchdog(false);
     this.set({ status: "idle", position: 0, engine: null });
   }
@@ -219,7 +240,7 @@ export class MusicPlayer {
     this.audio.pause();
     this.armWatchdog(false);
     this.resolver.invalidate(track.id);
-    reliability.block(track.id, error);
+    if (navigator.onLine !== false || track.source === "local") reliability.block(track.id, error);
     reliability.record({
       trackId: track.id,
       instance: error.instance || this.state.instance,
@@ -240,6 +261,8 @@ export class MusicPlayer {
     recovery = false,
   ): Promise<LoadResult> {
     this.stop(false);
+    this.loadStarted = performance.now();
+    this.usedPrefetch = track.source !== "local" && !!this.resolver.cached(track.id, settings);
     if (!recovery) this.recoveries = 0;
     const token = this.epoch;
     this.current = track;
@@ -255,7 +278,7 @@ export class MusicPlayer {
       trackId: track.id,
       duration: track.duration,
       position,
-      message: "Invidiousの音声を確認しています",
+      message: track.source === "local" ? "保存した音声を開いています" : "Invidiousの音声を確認しています",
       instance: "",
     });
     if ("mediaSession" in navigator)
@@ -265,6 +288,25 @@ export class MusicPlayer {
         artwork: track.thumbnail ? [{ src: track.thumbnail }] : [],
       });
     try {
+      if (track.source === "local") {
+        const blob = await savedAudio(track.id);
+        if (token !== this.epoch) return { status: "cancelled" };
+        if (!blob) throw new PlaybackError("no_stream", "保存音源が見つかりません。元のファイルをもう一度取り込んでください。", "play");
+        this.objectURL = URL.createObjectURL(blob);
+        this.set({ engine: "local", instance: "" });
+        try {
+          await this.startAudio({ instance: "", stream: { url: this.objectURL, mimeType: blob.type, bitrate: 0 } }, position, signal);
+        } catch (e) {
+          if (token !== this.epoch) return { status: "cancelled" };
+          if (classify(e).kind === "autoplay_blocked") {
+            this.set({ status: "blocked", message: "再生ボタンを押してください" }); return { status: "blocked" };
+          }
+          throw e;
+        }
+        if (token !== this.epoch) return { status: "cancelled" };
+        this.set({ status: "playing", message: "" }); return { status: "playing" };
+      }
+      if (navigator.onLine === false) throw new PlaybackError("no_stream", "オンライン曲はオフラインで再生できません。保存済み音源へ進みます。", "play");
       for (let round = 0; round < 2; round++) {
         const prepared = await this.resolver.prepare(
           track.id,
@@ -341,38 +383,48 @@ export class MusicPlayer {
     }
   }
   private startAudio(
-    prepared: PreparedAudio,
+    prepared: Pick<PreparedAudio, "instance" | "stream" | "buffer">,
     position: number,
     signal: AbortSignal,
   ) {
+    if (prepared.buffer) { this.adopt(prepared.buffer); prepared.buffer = undefined; }
+    const audio = this.audio;
     return new Promise<void>((resolve, reject) => {
       let settled = false;
       const done = (error?: unknown) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        this.audio.removeEventListener("loadedmetadata", metadata);
-        this.audio.removeEventListener("error", failure);
+        clearInterval(progressTimer);
+        audio.removeEventListener("timeupdate", progressed);
+        audio.removeEventListener("loadedmetadata", metadata);
+        audio.removeEventListener("error", failure);
         signal.removeEventListener("abort", cancel);
         error ? reject(error) : resolve();
       };
+      let baseline = position;
+      const progressed = () => {
+        if (!audio.paused && !audio.seeking && audio.currentTime > baseline + 0.02) done();
+      };
+      const progressTimer = setInterval(progressed, 50);
       const metadata = () => {
-        if (Number.isFinite(this.audio.duration)) {
-          this.set({ duration: this.audio.duration });
+        if (Number.isFinite(audio.duration)) {
+          this.set({ duration: audio.duration });
           if (position > 0)
-            this.audio.currentTime = Math.min(
+            audio.currentTime = Math.min(
               position,
-              Math.max(0, this.audio.duration - 0.2),
+              Math.max(0, audio.duration - 0.2),
             );
+          baseline = audio.currentTime;
         }
       };
       const failure = () =>
         done(
           new PlaybackError(
-            this.audio.error?.code === 3
+            audio.error?.code === 3
               ? "unsupported_format"
               : "network_or_cors",
-            `音声再生に失敗しました（MediaError ${this.audio.error?.code || 0}）`,
+            `音声再生に失敗しました（MediaError ${audio.error?.code || 0}）`,
             "play",
             prepared.instance,
           ),
@@ -390,8 +442,9 @@ export class MusicPlayer {
           ),
         6000,
       );
-      this.audio.addEventListener("loadedmetadata", metadata);
-      this.audio.addEventListener("error", failure);
+      audio.addEventListener("timeupdate", progressed);
+      audio.addEventListener("loadedmetadata", metadata);
+      audio.addEventListener("error", failure);
       signal.addEventListener("abort", cancel, { once: true });
       if (signal.aborted) {
         cancel();
@@ -403,8 +456,9 @@ export class MusicPlayer {
       this.audioConfirmed = false;
       this.stallAt = 0;
       this.started = false;
-      this.audio.src = prepared.stream.url;
-      void this.audio.play().then(() => done(), done);
+      if (audio.src !== prepared.stream.url) audio.src = prepared.stream.url;
+      if (audio.readyState >= 1) metadata();
+      void audio.play().then(progressed, done);
     });
   }
   async play(): Promise<LoadResult> {

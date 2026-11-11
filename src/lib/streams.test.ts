@@ -169,7 +169,7 @@ describe("decoded-audio preparation", () => {
     );
     await r.prepare("id", emptyData().settings);
     await r.prepare("id", emptyData().settings);
-    expect(at.mock.calls.length).toBe(4);
+    expect(at.mock.calls.filter(([url]) => url.includes("one")).length).toBe(2);
   });
   it("treats unsupported codecs as different from a Invidious-wide outage", async () => {
     vi.spyOn(invidious, "at").mockResolvedValue(info());
@@ -206,4 +206,20 @@ describe("decoded-audio preparation", () => {
     await expect(job).rejects.toThrow();
     finish(info());
   });
+});
+it("aborts the underlying preparation once its last consumer cancels",async()=>{
+ let acquired:AbortSignal|undefined;
+ vi.spyOn(invidious,"at").mockImplementation((_url,_path,signal)=>{acquired=signal;return new Promise(()=>{});});
+ const control=new AbortController();const resolver=new StreamResolver(()=>"probably",async()=>{});
+ const job=resolver.prepare("cancel-id",emptyData().settings,control.signal);control.abort();
+ await expect(job).rejects.toThrow();expect(acquired?.aborted).toBe(true);
+});
+it("shares duplicate acquisition while keeping a remaining consumer alive",async()=>{
+ let acquired:AbortSignal|undefined;let finish!:(value:any)=>void;
+ vi.spyOn(invidious,"at").mockImplementation((_url,_path,signal)=>{acquired=signal;return new Promise(r=>finish=r);});
+ const control=new AbortController();const resolver=new StreamResolver(()=>"probably",async()=>{});
+ const first=resolver.prepare("shared-id",emptyData().settings,control.signal);
+ const second=resolver.prepare("shared-id",emptyData().settings);
+ control.abort();await expect(first).rejects.toThrow();expect(acquired?.aborted).toBe(false);
+ finish(info());expect((await second).id).toBe("shared-id");
 });

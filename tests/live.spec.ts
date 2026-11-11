@@ -31,9 +31,10 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
       (await page.getByTestId("playback-diagnostics").textContent()) || "{}",
     );
   };
-  async function progresses() {
+  async function progresses(expectedId?: string) {
     const mini = page.locator(".mini-track");
     await expect(mini).toContainText("再生中", { timeout: 32000 });
+    if (expectedId) await expect(mini).toHaveAttribute("data-track-id", expectedId);
     const slider = page.getByLabel("再生位置", { exact: true });
     // A track switch resets the seek position (e.g. 214s -> 0s).
     // Measure advancing audio *after* the reset instead of comparing against
@@ -42,6 +43,7 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
     let accumulated = 0;
     await expect.poll(async () => {
       const status = await mini.innerText();
+      if (expectedId && await mini.getAttribute("data-track-id") !== expectedId) throw Error("Expected track was skipped or replaced before its audio progressed: " + expectedId);
       const position = Number(await slider.inputValue());
       if (!status.includes("再生中") || !Number.isFinite(position)) {
         previous = Number.NaN;
@@ -112,6 +114,7 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
         row.error = String(e).slice(0, 300);
       }
       const diag = await diagnostics();
+      row.start = diag.starts?.find((s: { id: string; at: number }) => s.id === t.id && s.at >= started);
       const events = diag.events.filter(
         (e: { trackId: string; at: number }) =>
           e.trackId === t.id && e.at >= started,
@@ -200,7 +203,8 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
           .getByRole("button", { name: "再生", exact: true })
           .click();
         for (let i = 0; i < 3; i++) {
-          await progresses();
+          await expect(page.locator(".mini-track")).toHaveAttribute("data-track-id", good[i], { timeout: 32000 });
+          await progresses(good[i]);
           if (i < 2)
             await page.getByLabel("再生位置", { exact: true }).press("End");
         }
@@ -229,8 +233,49 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
       report.continuousThreeDistinct = "unmet: 0 playable samples";
     }
     report.diagnostics = await diagnostics();
+    // Verify a public playlist through the same import UI, with no intercepted requests.
+    try {
+      if ((await page.locator(".mini-track").innerText()).includes("再生中")) {
+        await page.locator(".play-toggle").click();
+      }
+      await page.goto("./#import");
+      const id = "PLBCF2DAC6FFB574DE";
+      await page.getByLabel("プレイリストURL", { exact: true }).fill(
+        "https://www.youtube.com/playlist?list=" + id,
+      );
+      const fetchAll = page.getByRole("button", { name: "全ページを自動取得", exact: true });
+      await fetchAll.click();
+      await expect(fetchAll).toBeEnabled({ timeout: 45000 });
+      const summary = await page.locator("main [role=status]").innerText();
+      const count = await page.locator(".preview-list p").count();
+      const result = {
+        id,
+        status: count === 0 ? "BLOCKED" : summary.includes("全ページ取得完了") ? "PASS" : "PARTIAL",
+        summary,
+        receivedTracks: count,
+        registered: false,
+      };
+      report.playlistImport = result;
+      if (count > 0) {
+        const target = page.getByLabel("登録先プレイリスト");
+        const priorOptions = await target.locator("option").count();
+        await target.selectOption("");
+        await page.getByRole("button", { name: "この" + count + "曲を取り込む", exact: true }).click();
+        await expect(target.locator("option")).toHaveCount(priorOptions + 1);
+        await page.reload();
+        await expect(target.locator("option")).toHaveCount(priorOptions + 1);
+        result.registered = true;
+      }
+    } catch (e) {
+      report.playlistImport = {
+        ...(report.playlistImport as object),
+        status: "FAIL",
+        error: String(e).slice(0, 300),
+      };
+    }
   } catch (e) {
     errors.push(String(e));
+    report.diagnostics = await diagnostics().catch(() => ({}));
   } finally {
     await mkdir("test-results", { recursive: true });
     const name = "invidious-live-" + info.project.name;
@@ -250,8 +295,8 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
   // A green live qualification requires the full requested three-source result, not one cached hit.
   expect(
     report.actualPlayableCount,
-    "three distinct real YouTube posts must play",
-  ).toBeGreaterThanOrEqual(3);
+    "ten distinct real YouTube posts must play",
+  ).toBeGreaterThanOrEqual(10);
   expect(report.continuousThreeDistinct).toBe("passed");
   expect(report.radioContinuation).toBe("passed");
 });

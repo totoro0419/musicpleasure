@@ -122,7 +122,7 @@ export class InvidiousClient{
  async at<T>(url:string,path:string,signal?:AbortSignal,timeout=4500):Promise<T>{
   const started=performance.now(),video=path.startsWith("/api/v1/videos/");
   try{
-   const r=await fetch(url+path,{credentials:"omit",signal:signal?
+   const r=await fetch(url+path,{credentials:"omit",...(video?{cache:"no-store" as RequestCache}:{}),signal:signal?
      AbortSignal.any([signal,AbortSignal.timeout(timeout)]):AbortSignal.timeout(timeout)});
    const raw=await r.text();
    let data:Raw;
@@ -187,8 +187,11 @@ export class InvidiousClient{
   const page=Math.max(1,Number(nextpage)||1);
   const d=await this.request<Raw>("/api/v1/playlists/"+encodeURIComponent(id)+"?page="+page,signal);
   if(!d||!Array.isArray(d.videos))throw Error("プレイリスト応答の形式が不正です");
+  const total=Number.isFinite(d.videoCount)?Number(d.videoCount):undefined;
   return {name:String(d.title||id),relatedStreams:d.videos.map((x:Raw)=>normalizeItem(x)),
-    nextpage:d.videos.length>=100?String(page+1):undefined};
+    total, received:d.videos.length,
+    fingerprint:JSON.stringify(d.videos.map((x:Raw)=>[x.videoId,x.index,x.title])),
+    nextpage:d.videos.length && (total!==undefined ? page*100<total : d.videos.length>=100)?String(page+1):undefined};
  }
  async channel(path:string,signal?:AbortSignal):Promise<Track[]>{
   const id=path.match(/^\/channel\/([\w-]+)$/)?.[1]||(/^UC[\w-]+$/.test(path)?path:"");

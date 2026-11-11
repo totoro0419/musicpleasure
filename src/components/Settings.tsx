@@ -73,6 +73,7 @@ export function Settings({
               <option value="light">ライト</option>
             </select>
           </label>
+          <label><input type="checkbox" checked={data.settings.prefetch !== false} onChange={e => store.settings({ prefetch: e.target.checked })} />次曲の事前読み込み</label>
           <p className="muted">
             形式は端末の対応状況から選択します。MP3変換は行いません。
           </p>
@@ -84,6 +85,7 @@ export function Settings({
           </h2>
           <p className="muted">
             データはこのブラウザに保存されます。端末の変更やブラウザデータの削除前に書き出してください。
+            JSONには音声ファイルを含みません。「保存した音楽」から音声を別に書き出してください。
           </p>
           <div className="actions">
             <button onClick={exportData}>
@@ -134,7 +136,7 @@ export function Settings({
                   store.update(
                     (d) => ({
                       ...d,
-                      tracks: { ...d.tracks, ...backup.tracks },
+                      tracks: { ...d.tracks, ...Object.fromEntries(Object.entries(backup.tracks).map(([id, t]) => [id, t.source === "local" && t.local ? { ...t, local: { ...t.local, available: !!d.tracks[id]?.local?.available } } : t])) },
                       playlists: [
                         ...new Map(
                           [...d.playlists, ...backup.playlists].map((p) => [
@@ -202,7 +204,7 @@ export function Settings({
           <p className="muted">
             v2.0.0 · {__BUILD_ID__}
             <br />
-            オフラインでも保存済みライブラリを閲覧できます。音声再生には通信が必要です。
+            保存済みの音源はオフラインで再生できます。オンライン曲の再生・検索には通信が必要です。
           </p>
         </section>
         <section className="panel">
@@ -345,7 +347,7 @@ export function Settings({
             }}
           >
             {JSON.stringify(
-              { events: reliability.events, excluded: reliability.excluded },
+              { events: reliability.events, excluded: reliability.excluded, starts: player.metrics, media: { time: player.audio.currentTime, duration: player.audio.duration, paused: player.audio.paused, ended: player.audio.ended, seeking: player.audio.seeking, ready: player.audio.readyState, network: player.audio.networkState, currentTrack: player.state.trackId, status: player.state.status } },
               null,
               2,
             )}

@@ -2757,3 +2757,14 @@ html[data-theme="light"] .player-restore { background: var(--footer); color: var
   }
   .player-dismiss { right: 12px; }
 }
+/* Local library keeps frequent file and playback operations in view. */
+.local-management { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 0; border-bottom:1px solid var(--border); }
+.local-management > span { min-width:0; overflow-wrap:anywhere; }
+.local-management small { display:block; color:var(--muted); margin-top:4px; }
+.local-management .actions { flex-wrap:wrap; flex-shrink:0; }
+.import-results { max-height:220px; overflow:auto; overflow-wrap:anywhere; }
+.local-import details { margin-top:18px; }
+.local-import summary { cursor:pointer; padding:12px 0; }
+.local-import input[type=checkbox] { width:auto; }
+@media(max-width:700px) { .local-management { align-items:flex-start; flex-direction:column; } .local-management .actions { gap:8px; } .local-import .actions { flex-wrap:wrap; } }
+.local-art { display:grid; place-items:center; background:var(--panel); aspect-ratio:1; }

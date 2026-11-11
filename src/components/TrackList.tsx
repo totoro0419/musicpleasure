@@ -10,6 +10,7 @@ import {
   ArrowUp,
   ArrowDown,
   Trash2,
+  Music2,
 } from "lucide-react";
 import type { Track } from "../types";
 import { store, useStore } from "../lib/store";
@@ -147,7 +148,7 @@ export function TrackList({
                   aria-label={`${t.title}を再生`}
                   onClick={() => playTrack(t, row.index)}
                 >
-                  <img loading="lazy" src={t.thumbnail} alt="" />
+                  {t.thumbnail ? <img loading="lazy" src={t.thumbnail} alt="" /> : <Music2 size={24} />}
                   <Play size={20} fill="currentColor" />
                 </button>
                 <div className="tracktext">
@@ -160,6 +161,7 @@ export function TrackList({
                   <span>
                     {t.uploader}
                     {t.verified ? " ✓" : ""}
+                    {t.source === "local" ? t.local?.available ? " · 保存済み" : " · 音声未保存" : " · オンライン"}
                   </span>
                   {t.reason && <small className="reason">{t.reason}</small>}
                 </div>
@@ -275,13 +277,13 @@ export function TrackList({
                         リストから削除
                       </button>
                     )}
-                    <a
+                    {t.source !== "local" && <a
                       href={`https://www.youtube.com/watch?v=${t.id}`}
                       target="_blank"
                       rel="noreferrer"
                     >
                       YouTubeで開く ↗
-                    </a>
+                    </a>}
                     <button onClick={() => setOpen(null)}>閉じる</button>
                   </div>
                 </details>

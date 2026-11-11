@@ -27,6 +27,8 @@ export function rankCandidates(
   return unique(candidates.map((t) => t.id))
     .map((id) => candidates.find((t) => t.id === id)!)
     .filter((t) => !excluded.has(t.id) && !reliability.isExcluded(t.id))
+    .filter(t => mode !== "covers" || isCover(t.title))
+    .filter(t => mode !== "channel" || (t.uploaderUrl && seed.uploaderUrl ? t.uploaderUrl === seed.uploaderUrl : t.uploader === seed.uploader))
     .map((t) => {
       let score = 0;
       const reasons: string[] = [];
@@ -35,6 +37,9 @@ export function rankCandidates(
         seedWords.has(w),
       ).length;
       score += weights.related * (overlap + 1);
+      if (data.favorites.includes(t.id)) { score += weights.favorite * (mode === "favorites" ? 10 : 4); reasons.push("お気に入りの曲"); }
+      const additions = data.additions?.[t.id] || data.playlists.filter(p => p.tracks.includes(t.id)).length;
+      if (additions) { score += Math.min(8, additions * 2); reasons.push("プレイリストに追加した曲"); }
       if (overlap) reasons.push("現在の曲に関連");
       if (favoriteChannels.has(t.uploader)) {
         score += weights.favorite * 3;
@@ -51,9 +56,12 @@ export function rankCandidates(
           (mode === "discovery" ? 15 : 0);
         reasons.push("まだ聴いていない曲");
       } else {
-        score += Math.min(8, listening.seconds / 600) - listening.skips * 4;
-        if (Date.now() - listening.last < 86400000) score -= weights.recent * 3;
+        score += Math.min(8, listening.seconds / 600) + Math.min(6, listening.plays) - listening.skips * 4;
       }
+      if (listening?.last && Date.now() - listening.last < 86400000) score -= weights.recent * 3;
+      const recent = data.history.indexOf(t.id);
+      if (recent >= 0 && recent < 10) score -= weights.recent * (10 - recent) / 4;
+      score -= (listening?.skips || 0) * (listening?.plays ? 0 : 4);
       if (t.duration > 900) score -= 15;
       if (/解説|実況|ニュース|雑談|reaction|tutorial/i.test(t.title))
         score -= 25;
@@ -85,12 +93,13 @@ export function rankCandidates(
     .slice(0, 15);
 }
 export async function recommend(seed: Track, data: Data, signal?: AbortSignal) {
-  const pool: Track[] = [];
+  const pool: Track[] = Object.values(data.tracks).filter(t => !data.disliked.includes(t.id) && (navigator.onLine !== false || (t.source === "local" && t.local?.available)));
+  if (navigator.onLine === false) return rankCandidates(pool, seed, data);
   let errors = 0;
   try {
-    const info = await invidious.streams(seed.id, signal);
+    const info = seed.source === "local" ? undefined : await invidious.streams(seed.id, signal);
     pool.push(
-      ...info.relatedStreams.map(fromItem).filter((t): t is Track => !!t),
+      ...(info?.relatedStreams || []).map(fromItem).filter((t): t is Track => !!t),
     );
   } catch {
     errors++;
@@ -118,7 +127,14 @@ export async function recommend(seed: Track, data: Data, signal?: AbortSignal) {
     errors++;
   }
   pool.push(...data.favorites.map((id) => data.tracks[id]).filter(Boolean));
-  const ranked = rankCandidates(pool, seed, data);
+  let ranked = rankCandidates(pool, seed, data);
+  if (ranked.length < 4 && !signal?.aborted) {
+    try {
+      const fallback = await invidious.search(`${seed.uploader} ${mode === "covers" || mode === "versions" ? "歌ってみた" : "音楽"}`, undefined, signal);
+      pool.push(...fallback.items.map(fromItem).filter((t): t is Track => !!t));
+      ranked = rankCandidates(pool, seed, data);
+    } catch { errors++; }
+  }
   if (!ranked.length && errors)
     throw Error("推薦候補を取得できません。接続回復後に再試行してください。");
   return ranked;

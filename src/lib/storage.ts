@@ -2,23 +2,42 @@ import { openDB } from "idb";
 import { emptyData, validateBackup } from "./model";
 import type { Data } from "../types";
 let database: ReturnType<typeof openDB> | undefined;
-const db = () =>
-  (database ??= openDB("musicpleasure-v2", 2, {
+let expectedRevision: number | undefined;
+export const storageRevision = () => expectedRevision;
+export const db = () =>
+  (database ??= openDB("musicpleasure-v2", 3, {
     upgrade(db) {
       if (!db.objectStoreNames.contains("state")) db.createObjectStore("state");
+      if (!db.objectStoreNames.contains("audio")) db.createObjectStore("audio");
+      if (!db.objectStoreNames.contains("audioMeta")) db.createObjectStore("audioMeta");
     },
   }));
 export async function readData() {
   const d = await db();
-  let value = await d.get("state", "app");
+  const reading = d.transaction("state", "readonly");
+  const [saved, revision] = await Promise.all([reading.store.get("app"), reading.store.get("revision")]);
+  await reading.done;
+  let value = saved;
+  expectedRevision = Number(revision) || 0;
   if (typeof sessionStorage !== "undefined") {
     const recovery = sessionStorage.getItem("musicpleasure-recovery");
     if (recovery) {
       try {
         const raw = JSON.parse(recovery);
+        if ((raw.__revision ?? 0) !== expectedRevision) {
+          sessionStorage.removeItem("musicpleasure-recovery");
+          throw Error("古い復旧データを採用せず、最新の保存内容を維持しました");
+        }
         const restored = validateBackup(raw);
         restored.importJob = Array.isArray(raw.importJob) ? raw.importJob : [];
-        await d.put("state", restored, "app");
+        restored.playlistImport = raw.playlistImport;
+        const tx = d.transaction("state", "readwrite");
+        const revision = Number(await tx.store.get("revision")) || 0;
+        if (revision !== expectedRevision) { await tx.done; throw Error("別のタブが保存しました"); }
+        await tx.store.put(restored, "app");
+        await tx.store.put(revision + 1, "revision");
+        await tx.done;
+        expectedRevision = revision + 1;
         value = restored;
         sessionStorage.removeItem("musicpleasure-recovery");
       } catch {
@@ -29,6 +48,9 @@ export async function readData() {
   if (!value) return emptyData();
   const clean = validateBackup(value);
   clean.importJob = Array.isArray(value.importJob) ? value.importJob : [];
+  if (value.playlistImport?.id && Array.isArray(value.playlistImport.tracks) && Array.isArray(value.playlistImport.pages)) {
+    clean.playlistImport = { ...value.playlistImport, status: value.playlistImport.status === "fetching" ? "paused" : value.playlistImport.status };
+  }
   return clean;
 }
 let pending: Data | undefined;
@@ -41,7 +63,16 @@ export function saveData(data: Data): Promise<void> {
         while (pending) {
           const next = pending;
           pending = undefined;
-          await (await db()).put("state", next, "app");
+          const tx = (await db()).transaction("state", "readwrite");
+          const actual = Number(await tx.store.get("revision")) || 0;
+          if (expectedRevision !== undefined && actual !== expectedRevision) {
+            await tx.done;
+            throw Error("別のタブでライブラリが変更されました。上書きを停止しました。この画面の必要なデータをJSONに書き出してから再読み込みしてください。");
+          }
+          await tx.store.put(next, "app");
+          await tx.store.put(actual + 1, "revision");
+          await tx.done;
+          expectedRevision = actual + 1;
         }
       } finally {
         running = undefined;

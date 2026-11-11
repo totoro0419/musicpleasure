@@ -93,3 +93,10 @@ describe("service worker migration and update lifecycle", () => {
     expect(w.caches.match).toHaveBeenCalledWith("./index.html");
   });
 });
+it("serves precached assets offline even when the server varies responses by Origin", async () => {
+ const w=await boot([]);
+ w.caches.match.mockImplementation(async (_request: unknown, options?: {ignoreVary:boolean}) => options?.ignoreVary ? new Response("cached JavaScript") : undefined as any);
+ let response:Promise<Response>|undefined;
+ w.hooks.fetch({request:{method:"GET",url:"https://example.test/musicpleasure/assets/app.js",mode:"cors"},respondWith:(p:Promise<Response>)=>response=p});
+ expect(await(await response!).text()).toBe("cached JavaScript");
+});
