@@ -35,8 +35,9 @@ export class QueueTraversal {
             replenished = true;
             await this.context.replenish();
             if (token !== this.generation) return;
-            index = this.context.current() + 1;
-            if (index < this.context.queue().length) continue;
+            const current = this.context.current();
+            index = this.context.queue().findIndex((id, i) => i > current && !attempted.has(id));
+            if (index !== -1) continue;
           }
           this.context.exhausted(last, attempted.size);
           return;

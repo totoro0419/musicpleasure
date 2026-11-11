@@ -199,8 +199,9 @@ test("playlist edit, cover, deletion and undo change saved data", async ({ page 
   await expect(cover).toBeVisible();
   const originalCover = await cover.getAttribute("src");
   await page.getByText("画像URLで指定する", { exact: true }).click();
-  await page.getByLabel("カバー画像URL").fill("not a valid URL");
-  await page.getByLabel("説明文", { exact: true }).focus();
+  const coverUrl = page.getByLabel("カバー画像URL");
+  await coverUrl.fill("not a valid URL");
+  await coverUrl.press("Tab");
   await expect(page.getByText("画像はHTTPS URLを入力してください")).toBeVisible();
   await expect(cover).toHaveAttribute("src", originalCover!);
   await page.reload();
