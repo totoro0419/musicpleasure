@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  AudioLines,
   Home,
   Search as SearchIcon,
   Library as LibraryIcon,
