@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { store, useStore } from "./lib/store";
 import { player } from "./lib/player";
-import { move, time } from "./lib/model";
+import { time } from "./lib/model";
 import { Search } from "./components/Search";
 import { Library, PlaylistCard } from "./components/Library";
 import { Radio, modeLabels } from "./components/Radio";
@@ -111,7 +111,11 @@ function HomePage({ onAdd }: { onAdd: (ids: string[]) => void }) {
     </div>
   );
 }
-function NowPlaying({ onAdd }: { onAdd: (ids: string[]) => void }) {
+function NowPlaying({ onAdd, volume, onVolume }: {
+  onAdd: (ids: string[]) => void;
+  volume: number;
+  onVolume: (value: number) => void;
+}) {
   const { data, playback } = useStore();
   const t = data.tracks[data.queue[data.current]];
   return (
@@ -135,7 +139,7 @@ function NowPlaying({ onAdd }: { onAdd: (ids: string[]) => void }) {
                 <button onClick={() => store.previous()}><SkipBack size={18} />前の曲</button>
                 <button className="primary" onClick={() => store.toggle()}>
                   {playback.status === "playing" ? <Pause /> : <Play />}
-                  {playback.status === "playing" ? "一時停止" : "再生"}
+                  {playback.status === "playing" ? "一時停止" : playback.status === "loading" ? "読み込みを中止" : "再生"}
                 </button>
                 <button onClick={() => store.next()}><SkipForward size={18} />次の曲</button>
                 <button onClick={() => void store.startRadio(t)}>
@@ -172,7 +176,7 @@ function NowPlaying({ onAdd }: { onAdd: (ids: string[]) => void }) {
                 </button>
               </div>
               <label>再生位置 · {time(playback.position)} / {time(playback.duration || t.duration)}
-                <input aria-label="再生画面の再生位置" type="range" min="0" max={playback.duration || t.duration || 1} step="1" value={Math.min(playback.position, playback.duration || t.duration || 1)} onChange={e => player.seek(Number(e.target.value))} />
+                <input aria-label="再生画面の再生位置" type="range" min="0" max={playback.duration || t.duration || 1} step="1" value={Math.min(playback.engine ? playback.position : data.position, playback.duration || t.duration || 1)} onChange={e => store.seek(Number(e.target.value))} />
               </label>
               <label className="full-volume">
                 音量
@@ -182,8 +186,8 @@ function NowPlaying({ onAdd }: { onAdd: (ids: string[]) => void }) {
                   min="0"
                   max="1"
                   step=".01"
-                  defaultValue={player.audio.volume}
-                  onChange={(e) => player.volume(Number(e.target.value))}
+                  value={volume}
+                  onChange={(e) => onVolume(Number(e.target.value))}
                 />
               </label>
             </div>
@@ -214,7 +218,13 @@ export default function App() {
   const [online, setOnline] = useState(navigator.onLine);
   const [install, setInstall] = useState<InstallPrompt | null>(null);
   const [update, setUpdate] = useState<ServiceWorker | null>(null);
-  const [volume, setVolume] = useState(0.8);
+  const [volume, setVolume] = useState(() => {
+    try {
+      const saved = localStorage.getItem("musicpleasure-volume");
+      if (saved !== null && Number.isFinite(Number(saved))) return Math.max(0, Math.min(1, Number(saved)));
+    } catch {}
+    return player.audio.volume;
+  });
   const [miniPlayerHidden, setMiniPlayerHidden] = useState(() => {
     try {
       return window.localStorage.getItem("musicpleasure-mini-player-hidden") === "true";
@@ -283,16 +293,27 @@ export default function App() {
       // Storage can be blocked; the control still works in this session.
     }
   }, [miniPlayerHidden]);
+  useEffect(() => {
+    player.volume(volume);
+    try { localStorage.setItem("musicpleasure-volume", String(volume)); } catch {}
+  }, [volume]);
   function onAdd(ids: string[]) {
+    if (!ids.length) return;
+    setNewName("");
     setAddIds(ids);
     setTarget(data.playlists[0]?.id || "");
     dialog.current?.showModal();
   }
   async function doInstall() {
     if (install) {
-      await install.prompt();
-      await install.userChoice;
       setInstall(null);
+      try {
+        await install.prompt();
+        const choice = await install.userChoice;
+        if (choice.outcome === "accepted") store.notify("アプリのインストールを開始しました。");
+      } catch {
+        store.notify("インストール画面を開けませんでした。ブラウザのメニューから再試行してください。");
+      }
     } else
       store.notify(
         "Chrome / Edgeのメニューから「アプリをインストール」または「ホーム画面に追加」を選んでください。",
@@ -307,7 +328,7 @@ export default function App() {
         { once: true },
       );
       update.postMessage("SKIP_WAITING");
-    });
+    }).catch(() => store.notify("データを保存できず更新を中断しました。バックアップ後に再試行してください。"));
   }
   const current = data.tracks[data.queue[data.current]];
   const active = route.split("/")[0];
@@ -326,7 +347,10 @@ export default function App() {
   }[playback.status];
   return (
     <div className={`app${miniPlayerHidden ? " player-hidden" : ""}`}>
-      <a className="skip-link" href="#main-content">
+      <a className="skip-link" href="#main-content" onClick={(e) => {
+        e.preventDefault();
+        document.getElementById("main-content")?.focus();
+      }}>
         本文へ移動
       </a>
       <aside className="sidebar">
@@ -462,7 +486,7 @@ export default function App() {
             </button>
           </div>
         )}
-        <main id="main-content" className="content">
+        <main id="main-content" className="content" tabIndex={-1}>
           {!loaded ? (
             <div className="loading">ライブラリを開いています…</div>
           ) : active === "search" ? (
@@ -471,6 +495,7 @@ export default function App() {
             <Library
               key={route}
               id={active === "playlist" ? route.split("/")[1] : undefined}
+              initialPlaylistUrl={active === "import" && route.includes("/") ? "https://www.youtube.com/playlist?list=" + route.split("/")[1] : undefined}
               initialTab={active === "local" ? "local" : active === "import" ? "import" : "playlists"}
               onAdd={onAdd}
             />
@@ -529,25 +554,12 @@ export default function App() {
                 tracks={data.queue.map((id) => data.tracks[id]).filter(Boolean)}
                 onAdd={onAdd}
                 queue
-                reorder={(from, to) =>
-                  store.update((d) => {
-                    const q = move(d.queue, from, to);
-                    const current =
-                      from === d.current
-                        ? to
-                        : from < d.current && to >= d.current
-                          ? d.current - 1
-                          : from > d.current && to <= d.current
-                            ? d.current + 1
-                            : d.current;
-                    return { ...d, queue: q, current };
-                  })
-                }
+                reorder={(from, to) => store.moveQueue(from, to)}
                 onRemove={(i) => store.removeQueue(i)}
               />
             </>
           ) : active === "playing" ? (
-            <NowPlaying onAdd={onAdd} />
+            <NowPlaying onAdd={onAdd} volume={volume} onVolume={setVolume} />
           ) : (
             <HomePage onAdd={onAdd} />
           )}
@@ -687,7 +699,7 @@ export default function App() {
                 playback.duration || current?.duration || 1,
                 playback.engine ? playback.position : data.position,
               )}
-              onChange={(e) => player.seek(Number(e.target.value))}
+              onChange={(e) => store.seek(Number(e.target.value))}
               disabled={!current}
             />
             <span>{time(playback.duration || current?.duration || 0)}</span>
@@ -706,11 +718,7 @@ export default function App() {
             max="1"
             step=".01"
             value={volume}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              setVolume(v);
-              player.volume(v);
-            }}
+            onChange={(e) => setVolume(Number(e.target.value))}
           />
 
         </div>
@@ -723,7 +731,7 @@ export default function App() {
           >
             <span>{playback.message}</span>
             {(playback.status === "error" || playback.status === "blocked") && (
-              <button onClick={() => void store.playCurrent(playback.position)}>
+              <button onClick={() => store.toggle()}>
                 再試行 / 再開
               </button>
             )}

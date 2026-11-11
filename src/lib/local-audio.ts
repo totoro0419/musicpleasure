@@ -44,6 +44,14 @@ export async function putAudio(track: Track, blob: Blob) {
     await tx.done;
   } catch (e) { try { tx.abort(); } catch {} await tx.done.catch(() => {}); throw e; }
 }
+export async function editAudioMetadata(track: Track) {
+  const tx = (await db()).transaction(["audio", "audioMeta"], "readwrite");
+  const stored = await tx.objectStore("audio").getKey(track.id);
+  const edited = track.local ? { ...track, local: { ...track.local, available: stored !== undefined } } : track;
+  if (stored !== undefined) await tx.objectStore("audioMeta").put(edited, track.id);
+  await tx.done;
+  return edited;
+}
 export async function deleteAudio(id: string) {
   const tx = (await db()).transaction(["audio", "audioMeta"], "readwrite");
   await Promise.all([tx.objectStore("audio").delete(id), tx.objectStore("audioMeta").delete(id)]);

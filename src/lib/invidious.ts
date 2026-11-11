@@ -12,10 +12,25 @@ const seed=[
   "https://invidious.tiekoetter.com",
 ];
 type Raw=Record<string,any>;
+function instanceOrigin(value: string) {
+  const url = new URL(value);
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.pathname !== "/")
+    throw Error("HTTPSのAPIホストを指定してください");
+  return url.origin;
+}
+function validResponse(path: string, value: Raw) {
+  if (path.startsWith("/api/v1/search?")) return Array.isArray(value);
+  if (path.startsWith("/api/v1/search/suggestions")) return Array.isArray(value?.suggestions);
+  if (path.startsWith("/api/v1/playlists/") || path.startsWith("/api/v1/channels/")) {
+    return (path.startsWith("/api/v1/channels/") && Array.isArray(value)) || Array.isArray(value?.videos);
+  }
+  return true;
+}
 const fresh=(url:string):InstanceHealth=>({url,success:0,failure:0,latency:1200,cooldown:0,lastError:"",audioSuccess:0,lastChecked:0});
 const image=(raw:unknown,base:string)=>{
   if(!Array.isArray(raw))return "";
   const best=[...raw].sort((a,b)=>(Number(b.width)||0)-(Number(a.width)||0))[0]?.url;
+  if (!best) return "";
   try {const u=new URL(String(best||""),base);return u.protocol==="https:"?u.href:"";}catch{return "";}
 };
 export function normalizeItem(raw:Raw,base="https://yt.chocolatemoo53.com"):InvidiousItem{
@@ -35,7 +50,7 @@ export function normalizeItem(raw:Raw,base="https://yt.chocolatemoo53.com"):Invi
 }
 function normalizeFormat(raw:Raw,base:string):AudioStream{
   let url="";
-  try{const u=new URL(String(raw.url||""),base);if(u.protocol==="https:")url=u.href;}catch{}
+  try{if (raw.url) { const u=new URL(String(raw.url),base);if(u.protocol==="https:")url=u.href; }}catch{}
   const type=String(raw.type||"");
   return {url, itag:/^[0-9]{1,3}$/.test(String(raw.itag||""))?String(raw.itag):undefined,
     mimeType:type.split(";")[0].trim(),
@@ -72,18 +87,14 @@ export class InvidiousClient{
     const saved=await healthRead();
     if(Array.isArray(saved))this.health=saved.filter(x=>{
       if(typeof x.url!=="string")return false;
-      try{const u=new URL(x.url);return u.protocol==="https:"&&
-        (seed.includes(u.origin)||/invidious|(^inv\.)|(^yt\.)|chocolatemoo/i.test(u.hostname));}catch{return false;}
+      try { return instanceOrigin(x.url) === x.url; } catch { return false; }
     });
    }catch{}
    for(const url of seed)if(!this.health.some(h=>h.url===url))this.health.push(fresh(url));
    this.onHealth();
  }
  add(url:string){
-  const u=new URL(url);
-  if(u.protocol!=="https:"||u.username||u.password||u.search||u.hash||u.pathname!=="/")
-   throw Error("HTTPSのAPIホストを指定してください");
-  const clean=u.origin;
+  const clean=instanceOrigin(url);
   if(!this.health.some(h=>h.url===clean))this.health.push(fresh(clean));
   this.record();return clean;
  }
@@ -135,10 +146,13 @@ export class InvidiousClient{
       "HTTP "+r.status+": "+detail.slice(0,160),
       video?"streams":"api",url,r.status);
    }
+   const value = video ? normalizeVideo(data,url,path.split("/")[4]?.split("?")[0]) : data;
+   if (!video && !validResponse(path, data))
+     throw new PlaybackError("invalid_response", "Invidiousの応答形式が正しくありません", "api", url, r.status);
    const h=this.health.find(h=>h.url===url);
    if(h){h.success++;h.latency=performance.now()-started;h.lastChecked=Date.now();
     h.cooldown=0;h.lastError="";this.record();}
-   return (video?normalizeVideo(data,url,path.split("/")[4]?.split("?")[0]):data) as T;
+   return value as T;
   }catch(e){
    const err=classify(e,video?"streams":"api",url);
    if(!signal?.aborted){
@@ -150,7 +164,9 @@ export class InvidiousClient{
   }
  }
  async request<T>(path:string,signal?:AbortSignal,force=false):Promise<T>{
-  const cache=this.cache.get(path);
+  signal?.throwIfAborted();
+  const key = this.preferred + ":" + path;
+  const cache=this.cache.get(key);
   if(!force&&cache&&Date.now()-cache.at<90000)return cache.value as T;
   const ranked=this.ranked();
   const candidates=[...ranked,...this.ranked(true).filter(h=>!ranked.includes(h))].slice(0,8);
@@ -160,7 +176,8 @@ export class InvidiousClient{
    if(combined.aborted)break;
    try{
     const value=await Promise.any(candidates.slice(i,i+3).map(h=>this.at<T>(h.url,path,combined,5000)));
-    this.cache.set(path,{at:Date.now(),value});
+    signal?.throwIfAborted();
+    this.cache.set(key,{at:Date.now(),value});
     if(this.cache.size>150)this.cache.delete(this.cache.keys().next().value!);
     return value;
    }catch{if(signal?.aborted)throw signal.reason;}
@@ -194,15 +211,18 @@ export class InvidiousClient{
     nextpage:d.videos.length && (total!==undefined ? page*100<total : d.videos.length>=100)?String(page+1):undefined};
  }
  async channel(path:string,signal?:AbortSignal):Promise<Track[]>{
-  const id=path.match(/^\/channel\/([\w-]+)$/)?.[1]||(/^UC[\w-]+$/.test(path)?path:"");
+  const pathname = new URL(path, "https://www.youtube.com").pathname;
+  const id=pathname.match(/^\/channel\/([\w-]+)\/?$/)?.[1]||(/^UC[\w-]+$/.test(path)?path:"");
   if(!id)throw Error("チャンネルURLに対応していません");
   const d=await this.request<Raw|Raw[]>("/api/v1/channels/"+encodeURIComponent(id)+"/videos",signal);
   const items=Array.isArray(d)?d:Array.isArray(d.videos)?d.videos:[];
   return items.map((x:Raw)=>fromItem(normalizeItem(x))).filter((x):x is Track=>!!x);
  }
  async check(){
-  this.health.forEach(h=>h.cooldown=0);
-  await Promise.allSettled(this.health.map(h=>this.at(h.url,"/api/v1/search?q=music&type=video",undefined,5000)));
+  this.cache.clear();
+  this.health.forEach(h => { h.cooldown = 0; h.audioCooldown = 0; });
+  const results = await Promise.allSettled(this.health.map(h=>this.at(h.url,"/api/v1/search?q=music&type=video",undefined,5000)));
+  return results.filter((result) => result.status === "fulfilled").length;
  }
 }
 export function compatibleStreams(streams:AudioStream[],canPlay:(type:string)=>string,quality="balanced",allowMuxed=false){

@@ -42,7 +42,14 @@ export function PlaylistCommands({ playlistId }: { playlistId: string }) {
           <p>{plan.description}</p>
           <button className="primary" onClick={() => {
             try {
-              store.update(plan.execute, true);
+              const current = planCommand(command, playlistId, store.data);
+              if (current.description !== plan.description) {
+                setPlan(current);
+                setError("プレイリストが更新されました。新しいプレビューを確認してください。");
+                return;
+              }
+              store.update(current.execute, true);
+              setError("");
               setPlan(null);
               store.notify("変更しました。元に戻すで取り消せます。");
             } catch (e) {

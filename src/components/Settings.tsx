@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Download, Upload, RefreshCw, ShieldCheck, Server } from "lucide-react";
 import { store, useStore } from "../lib/store";
 import { validateBackup } from "../lib/model";
@@ -17,6 +17,8 @@ export function Settings({
 }) {
   const { data } = useStore();
   const [backup, setBackup] = useState<Data | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const backupRead = useRef(0);
   const [error, setError] = useState("");
   const [custom, setCustom] = useState("");
   const [confirmReset, setConfirmReset] = useState(false);
@@ -110,18 +112,22 @@ export function Settings({
               <input
                 type="file"
                 accept="application/json,.json"
+                disabled={restoring}
                 onChange={async (e) => {
                   const f = e.target.files?.[0];
                   if (!f) return;
+                  e.target.value = "";
+                  const token = ++backupRead.current;
+                  setBackup(null);
+                  setError("");
                   try {
                     if (f.size > 30_000_000)
                       throw Error("30MB以下のファイルを選択してください");
-                    setBackup(validateBackup(JSON.parse(await f.text())));
-                    setError("");
+                    const candidate = validateBackup(JSON.parse(await f.text()));
+                    if (token === backupRead.current) setBackup(candidate);
                   } catch (e) {
-                    setError(e instanceof Error ? e.message : String(e));
+                    if (token === backupRead.current) setError(e instanceof Error ? e.message : String(e));
                   }
-                  e.target.value = "";
                 }}
               />
             </label>
@@ -142,10 +148,14 @@ export function Settings({
               </p>
               <button
                 className="primary"
-                onClick={() => {
+                disabled={restoring}
+                onClick={async () => {
+                  setRestoring(true);
+                  setError("");
                   player.stop();
                   store.enableSaving();
-                  store.update(
+                  try {
+                    store.update(
                     (d) => ({
                       ...d,
                       tracks: { ...d.tracks, ...Object.fromEntries(Object.entries(backup.tracks).map(([id, t]) => [id, t.source === "local" && t.local ? { ...t, local: { ...t.local, available: !!d.tracks[id]?.local?.available } } : t])) },
@@ -170,20 +180,29 @@ export function Settings({
                       current: backup.current,
                       position: backup.position,
                       radio: backup.radio,
+                      radioSeed: backup.radioSeed,
+                      radioGenerated: backup.radioGenerated,
+                      disliked: [...new Set([...backup.disliked, ...d.disliked])],
+                      searches: [...new Set([...backup.searches, ...d.searches])].slice(0, 30),
+                      additions: { ...d.additions, ...backup.additions },
                       shuffle: backup.shuffle,
                       repeat: backup.repeat,
                     }),
                     true,
                   );
-                  setBackup(null);
-                  store.notify(
-                    "バックアップを復元しました。再生ボタンで再開できます。",
-                  );
+                    await store.flush();
+                    setBackup(null);
+                    store.notify("バックアップを復元しました。再生ボタンで再開できます。");
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : String(e));
+                  } finally {
+                    setRestoring(false);
+                  }
                 }}
               >
                 確認して復元
               </button>
-              <button onClick={() => setBackup(null)}>キャンセル</button>
+              <button disabled={restoring} onClick={() => setBackup(null)}>キャンセル</button>
             </div>
           )}
         </section>
@@ -192,17 +211,16 @@ export function Settings({
           <div className="actions">
             <button onClick={onInstall}>アプリをインストール</button>
             <button
-              onClick={() =>
-                void navigator.serviceWorker
-                  ?.getRegistration()
-                  .then((r) => r?.update())
-                  .then(() =>
-                    store.notify(
-                      "更新を確認しました。新しい版があれば更新ボタンが表示されます。",
-                    ),
-                  )
-                  .catch(() => store.notify("更新を確認できませんでした"))
-              }
+              onClick={async () => {
+                try {
+                  const registration = await navigator.serviceWorker?.getRegistration();
+                  if (!registration) throw Error("オフライン機能の準備ができていません");
+                  await registration.update();
+                  store.notify("更新を確認しました。新しい版があれば更新ボタンが表示されます。");
+                } catch (e) {
+                  store.notify(`更新を確認できませんでした。通信を確認して再試行してください。 ${e instanceof Error ? e.message : ""}`);
+                }
+              }}
             >
               <RefreshCw size={17} />
               更新を確認
@@ -280,7 +298,10 @@ export function Settings({
             onClick={async () => {
               setChecking(true);
               try {
-                await invidious.check();
+                const count = await invidious.check();
+                store.notify(count ? `${count}件のInvidious接続先が応答しました。` : "応答するInvidious接続先がありません。時間をおいて再評価してください。");
+              } catch {
+                store.notify("接続先を確認できませんでした。時間をおいて再評価してください。");
               } finally {
                 setChecking(false);
               }

@@ -1,5 +1,5 @@
 import type { Data, Track, RadioMode } from "../types";
-import { fromItem, unique } from "./model";
+import { fromItem } from "./model";
 import { invidious } from "./invidious";
 import { reliability } from "./reliability";
 export const isCover = (s: string) =>
@@ -12,6 +12,20 @@ export const words = (s: string) =>
       .split(/[\s\-–—|/「」『』（）()、,]+/)
       .filter((x) => x.length > 1),
   );
+function songTitle(title: string, uploader: string) {
+  let core = title.normalize("NFKC")
+    .replace(/【[^】]*】|\[[^\]]*\]/g, " ")
+    .replace(/\([^)]*(?:cover|歌ってみた|カバー|official|remix|version|ライブ|live)[^)]*\)/gi, " ")
+    .split(/[|/]|\s+(?:covered by|cover by|歌ってみた|カバー)\b/i)[0]
+    .replace(/cover|歌ってみた|カバー/gi, " ")
+    .trim();
+  const parts = core.split(/\s+[-–—]\s+/);
+  if (parts.length > 1 && parts[0].toLowerCase() === uploader.toLowerCase()) core = parts[1];
+  return core.trim() || title;
+}
+function songKey(title: string) {
+  return title.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+}
 export function rankCandidates(
   candidates: Track[],
   seed: Track,
@@ -23,12 +37,17 @@ export function rankCandidates(
       data.favorites.map((id) => data.tracks[id]?.uploader),
     ),
     weights = data.settings.weights;
+  const seedSong = songKey(songTitle(seed.title, seed.uploader));
   const excluded = new Set([...data.queue, ...data.disliked, seed.id]);
-  return unique(candidates.map((t) => t.id))
-    .map((id) => candidates.find((t) => t.id === id)!)
+  return [...new Map(candidates.map((t) => [t.id, t])).values()]
     .filter((t) => !excluded.has(t.id) && !reliability.isExcluded(t.id))
+    .filter((t) => {
+      if (mode !== "versions") return true;
+      const song = songKey(songTitle(t.title, t.uploader));
+      return !!seedSong && (song === seedSong || (seedSong.length >= 3 && song.includes(seedSong)));
+    })
     .filter(t => mode !== "covers" || isCover(t.title))
-    .filter(t => mode !== "channel" || (t.uploaderUrl && seed.uploaderUrl ? t.uploaderUrl === seed.uploaderUrl : t.uploader === seed.uploader))
+    .filter(t => mode !== "channel" || (t.uploaderUrl && seed.uploaderUrl ? t.uploaderUrl === seed.uploaderUrl : !!seed.uploader && t.uploader === seed.uploader))
     .map((t) => {
       let score = 0;
       const reasons: string[] = [];
@@ -75,8 +94,7 @@ export function rankCandidates(
       }
       if (mode === "versions") {
         score += overlap * 10;
-        if (t.uploader !== seed.uploader && overlap)
-          reasons.unshift("同じ曲の別バージョン候補");
+        reasons.unshift("同じ曲の別バージョン候補");
       }
       if (mode === "favorites" && favoriteChannels.has(t.uploader)) score += 20;
       return {
@@ -86,55 +104,45 @@ export function rankCandidates(
       };
     })
     .sort((a, b) => b.score - a.score)
-    .filter(
-      (t, i, a) =>
-        i < 2 || a[i - 1].uploader !== t.uploader || mode === "channel",
-    )
     .slice(0, 15);
 }
 export async function recommend(seed: Track, data: Data, signal?: AbortSignal) {
   const pool: Track[] = Object.values(data.tracks).filter(t => !data.disliked.includes(t.id) && (navigator.onLine !== false || (t.source === "local" && t.local?.available)));
   if (navigator.onLine === false) return rankCandidates(pool, seed, data);
-  let errors = 0;
-  try {
-    const info = seed.source === "local" ? undefined : await invidious.streams(seed.id, signal);
-    pool.push(
-      ...(info?.relatedStreams || []).map(fromItem).filter((t): t is Track => !!t),
-    );
-  } catch {
-    errors++;
-  }
-  if (signal?.aborted) return [];
   const mode = data.settings.radioMode;
-  const core = seed.title
-    .replace(/【[^】]*】|\[[^\]]*\]|歌ってみた|cover|カバー/gi, " ")
-    .split(/[|／]/)[0]
-    .trim();
-  const query =
-    mode === "channel"
-      ? `${seed.uploader} 音楽`
-      : mode === "covers" || mode === "versions"
-        ? `${core} 歌ってみた cover`
-        : `${core} music`;
-  try {
-    if (mode === "channel" && seed.uploaderUrl)
-      pool.push(...(await invidious.channel(seed.uploaderUrl, signal)));
-    else {
-      const r = await invidious.search(query, undefined, signal);
-      pool.push(...r.items.map(fromItem).filter((t): t is Track => !!t));
-    }
-  } catch {
-    errors++;
+  const core = songTitle(seed.title, seed.uploader);
+  const query = mode === "channel"
+    ? `${seed.uploader} 音楽`
+    : mode === "covers" || mode === "versions"
+      ? `${core} 歌ってみた cover`
+      : `${core} music`;
+  const search = async (term: string) => {
+    const result = await invidious.search(term, undefined, signal);
+    return result.items.map(fromItem).filter((t): t is Track => !!t);
+  };
+  const related = async () => {
+    if (seed.source === "local") return [];
+    const info = await invidious.streams(seed.id, signal);
+    return info.relatedStreams.map(fromItem).filter((t): t is Track => !!t);
+  };
+  const sources = await Promise.allSettled([
+    related(),
+    mode === "channel" && seed.uploaderUrl ? invidious.channel(seed.uploaderUrl, signal) : search(query),
+  ]);
+  signal?.throwIfAborted();
+  let errors = 0;
+  for (const result of sources) {
+    if (result.status === "fulfilled") pool.push(...result.value);
+    else errors++;
   }
-  pool.push(...data.favorites.map((id) => data.tracks[id]).filter(Boolean));
   let ranked = rankCandidates(pool, seed, data);
-  if (ranked.length < 4 && !signal?.aborted) {
+  if (ranked.length < 2 && !signal?.aborted) {
     try {
-      const fallback = await invidious.search(`${seed.uploader} ${mode === "covers" || mode === "versions" ? "歌ってみた" : "音楽"}`, undefined, signal);
-      pool.push(...fallback.items.map(fromItem).filter((t): t is Track => !!t));
+      pool.push(...await search(mode === "versions" ? `${core} acoustic live remix` : `${seed.uploader || core} ${mode === "covers" ? "歌ってみた" : "音楽"}`));
       ranked = rankCandidates(pool, seed, data);
     } catch { errors++; }
   }
+  signal?.throwIfAborted();
   if (!ranked.length && errors)
     throw Error("推薦候補を取得できません。接続回復後に再試行してください。");
   return ranked;

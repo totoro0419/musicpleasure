@@ -7,13 +7,13 @@ import {
 } from "../lib/importer";
 import { playlistId, newPlaylist } from "../lib/model";
 import { fetchPlaylist, playlistJob } from "../lib/playlist-import";
-export function ImportPanel() {
+export function ImportPanel({ initialPlaylistUrl = "" }: { initialPlaylistUrl?: string }) {
   const { data } = useStore();
   const [text, setText] = useState("");
   const [target, setTarget] = useState(data.playlists[0]?.id || "");
   const [busy, setBusy] = useState(false);
   const cancel = useRef<AbortController | null>(null);
-  const [playlistURL, setPlaylistURL] = useState("");
+  const [playlistURL, setPlaylistURL] = useState(initialPlaylistUrl);
   const job = data.playlistImport;
   const preview = job?.tracks || [];
   const playlistName = job?.name || "YouTubeから取り込み";
@@ -21,6 +21,7 @@ export function ImportPanel() {
   useEffect(() => () => cancel.current?.abort(), []);
   const items = data.importJob;
   async function run(reset = false) {
+    if (cancel.current) return;
     setError("");
     const work = reset ? parseList(text) : items;
     if (!work.length) {
@@ -47,6 +48,7 @@ export function ImportPanel() {
     } catch (e) {
       if (!signal.aborted) setError(String(e));
     } finally {
+      cancel.current = null;
       setBusy(false);
     }
   }
@@ -54,7 +56,7 @@ export function ImportPanel() {
     const chosen = items.flatMap((x) =>
       x.selected ? x.candidates.filter((t) => t.id === x.selected) : [],
     );
-    if (!chosen.length) return;
+    if (!chosen.length || cancel.current) return;
     store.addTracks(chosen);
     let id = target;
     if (!id) {
@@ -68,10 +70,11 @@ export function ImportPanel() {
     store.notify(`${chosen.length}曲を登録しました。元に戻すで取り消せます。`);
   }
   async function loadPlaylist(resume = false) {
+    if (cancel.current) return;
     setError("");
     const id = playlistId(playlistURL);
     if (!resume && !id) { setError("YouTubeプレイリストURLを入力してください"); return; }
-    const work = resume ? job : playlistJob(id!);
+    const work = resume || (job?.id === id && job.next && job.status !== "complete") ? job : playlistJob(id!);
     if (!work) return;
     setBusy(true); cancel.current = new AbortController();
     try {
@@ -80,7 +83,7 @@ export function ImportPanel() {
         await store.flush();
       }, cancel.current.signal);
     } catch (e) { setError(String(e)); }
-    finally { setBusy(false); }
+    finally { cancel.current = null; setBusy(false); }
   }
   const complete = items.filter((x) => x.status !== "pending").length;
   return (
@@ -124,7 +127,7 @@ export function ImportPanel() {
             <ClipboardPaste size={18} />
             検索・照合する
           </button>
-          {items.length > 0 && (
+          {items.some((x) => x.status === "pending" || x.status === "failed") && (
             <button disabled={busy} onClick={() => void run()}>
               未完了を再開 / 再試行
             </button>

@@ -269,6 +269,8 @@ export function validateBackup(raw: unknown): Data {
     repeat: ["off", "all", "one"].includes(d.repeat) ? d.repeat : "off",
     shuffle: !!d.shuffle,
     radio: !!d.radio,
+    radioSeed: typeof d.radioSeed === "string" && tracks[d.radioSeed] ? d.radioSeed : undefined,
+    radioGenerated: ids(d.radioGenerated).filter((id) => queue.includes(id)),
     settings,
     searches: Array.isArray(d.searches)
       ? d.searches.filter((x) => typeof x === "string").slice(0, 30)

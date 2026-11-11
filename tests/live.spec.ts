@@ -10,6 +10,7 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
     "Explicit PC/tablet live service verification",
   );
   test.setTimeout(720000);
+  page.setDefaultTimeout(12000);
   const results: Array<Record<string, unknown>> = [];
   const report: Record<string, unknown> = {
     at: new Date().toISOString(),
@@ -82,7 +83,9 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
   try {
     expect(tracks.length).toBeGreaterThanOrEqual(10);
     expect(tracks.filter((t) => t.cover).length).toBeGreaterThanOrEqual(5);
+    console.log("LIVE_BEGIN", info.project.name, report.url);
     await page.goto("./#settings");
+    await page.getByText("再生できないときの接続設定・診断", { exact: true }).click();
     await page
       .getByText("選択した接続先の音声再生を確認", { exact: true })
       .click();
@@ -211,23 +214,29 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
         report.continuousThreeDistinct = "passed";
       } else
         report.continuousThreeDistinct = `unmet: only ${good.length} distinct post(s) playable`;
+      await restore(good);
       await page.goto("./#radio");
-      await page
-        .getByRole("button", { name: "ラジオを開始", exact: true })
-        .click();
-      await progresses();
-      await page.goto("./#queue");
+      await page.getByRole("button", { name: "ラジオを開始", exact: true }).click();
+      const mini = page.locator(".mini-track");
+      const heard: string[] = [];
       try {
-        await expect
-          .poll(() => page.locator(".trackrow").count(), { timeout: 100000 })
-          .toBeGreaterThan(1);
-        await page.getByLabel("再生位置", { exact: true }).press("End");
-        await progresses();
+        await progresses(good[0]);
+        heard.push(good[0]);
+        for (let i = 0; i < 2; i++) {
+          await expect.poll(() => page.locator("main .trackrow").count(), { timeout: 100000 }).toBeGreaterThan(0);
+          await page.getByLabel("再生位置", { exact: true }).press("End");
+          await expect(mini).not.toHaveAttribute("data-track-id", heard.at(-1)!, { timeout: 60000 });
+          const id = await mini.getAttribute("data-track-id");
+          if (!id || heard.includes(id)) throw Error("異なる推薦曲へ移行しませんでした");
+          await progresses(id);
+          heard.push(id);
+        }
         report.radioContinuation = "passed";
       } catch (e) {
-        report.radioContinuation = "unmet: no next playable recommendation";
+        report.radioContinuation = "unmet: fewer than three distinct audible tracks";
         errors.push(String(e).slice(0, 250));
       }
+      report.radioTrackIds = heard;
     } else {
       report.automaticFailureSkip = "unverified: no playable live sample";
       report.continuousThreeDistinct = "unmet: 0 playable samples";

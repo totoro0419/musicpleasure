@@ -6,6 +6,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
+    channel: process.env.E2E_CHROME_CHANNEL || undefined,
     baseURL: process.env.E2E_BASE_URL || "http://127.0.0.1:4173/musicpleasure/",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",

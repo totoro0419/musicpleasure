@@ -203,3 +203,18 @@ describe("codec and quality selection", () => {
     );
   });
 });
+
+it("restores the radio seed and generated queue without requiring new fields in older backups", () => {
+  const data = emptyData();
+  const seed = placeholder("M7lc1UVf-VE");
+  const generated = placeholder("aqz-KE-bpKQ");
+  data.tracks = { [seed.id]: seed, [generated.id]: generated };
+  data.queue = [seed.id, generated.id];
+  data.radio = true;
+  expect(validateBackup(data).radioSeed).toBeUndefined();
+  data.radioSeed = seed.id;
+  data.radioGenerated = [generated.id, "dQw4w9WgXcQ"];
+  const restored = validateBackup(data);
+  expect(restored.radioSeed).toBe(seed.id);
+  expect(restored.radioGenerated).toEqual([generated.id]);
+});
