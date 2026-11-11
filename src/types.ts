@@ -74,6 +74,8 @@ export interface Data {
   shuffle: boolean;
   repeat: "off" | "all" | "one";
   radio: boolean;
+  radioSeed?: string;
+  radioGenerated?: string[];
   settings: Settings;
   searches: string[];
   importJob: ImportItem[];

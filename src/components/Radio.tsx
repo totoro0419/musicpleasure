@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { Radio as RadioIcon, Sparkles, RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Radio as RadioIcon, Sparkles, RefreshCw, Search } from "lucide-react";
 import { store, useStore } from "../lib/store";
 import type { RadioMode, Track } from "../types";
-import { recommend } from "../lib/recommend";
+import { invidious } from "../lib/invidious";
+import { fromItem, unique } from "../lib/model";
 import { TrackList } from "./TrackList";
 export const modeLabels: Record<RadioMode, string> = {
   favorites: "お気に入り中心",
@@ -13,11 +14,53 @@ export const modeLabels: Record<RadioMode, string> = {
   versions: "同じ曲の別バージョン",
 };
 export function Radio({ onAdd }: { onAdd: (ids: string[]) => void }) {
-  const { data } = useStore();
-  const [candidates, setCandidates] = useState<Track[]>([]);
+  const { data, playback, radioStatus } = useStore();
+  const [selection, setSelection] = useState("");
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Track[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const seed = data.tracks[data.queue[data.current]];
+  const searchRequest = useRef<AbortController | undefined>(undefined);
+  useEffect(() => () => searchRequest.current?.abort(), []);
+  const current = data.tracks[data.queue[data.current]];
+  const saved = useMemo(() => [
+    { label: "お気に入り", ids: data.favorites },
+    { label: "再生履歴", ids: data.history },
+    { label: "プレイリスト", ids: unique(data.playlists.flatMap((p) => p.tracks)) },
+  ], [data.favorites, data.history, data.playlists]);
+  const available = (track?: Track) => track && (track.source !== "local" || track.local?.available);
+  const fallback = [data.radioSeed, current?.id, ...saved.flatMap((group) => group.ids)]
+    .find((id) => id && available(data.tracks[id]));
+  const chosen = selection ? (data.tracks[selection] || results.find((track) => track.id === selection)) : undefined;
+  const seed = available(chosen) ? chosen : fallback ? data.tracks[fallback] : undefined;
+  const upcoming = data.radio ? data.queue.slice(data.current + 1).map((id) => data.tracks[id]).filter(Boolean) : [];
+  const stateText = playback.status === "loading" ? "曲を準備中…"
+    : playback.status === "playing" ? "再生中"
+    : playback.status === "paused" ? "一時停止中"
+    : playback.status === "blocked" ? "プレーヤーの再生ボタンで再開できます。"
+    : radioStatus.phase === "finding" ? "次の曲を準備中…"
+    : "";
+  async function search() {
+    const term = query.trim();
+    if (!term) return;
+    searchRequest.current?.abort();
+    const controller = new AbortController();
+    searchRequest.current = controller;
+    setBusy(true);
+    setError("");
+    setResults([]);
+    try {
+      const page = await invidious.search(term, undefined, controller.signal);
+      if (controller.signal.aborted) return;
+      const tracks = page.items.map(fromItem).filter((track): track is Track => !!track);
+      setResults([...new Map(tracks.map((track) => [track.id, track])).values()]);
+      if (!tracks.length) setError("曲が見つかりませんでした。曲名や歌い手を変えて検索してください。");
+    } catch (e) {
+      if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (searchRequest.current === controller) setBusy(false);
+    }
+  }
   return (
     <>
       <div className="page-intro">
@@ -33,30 +76,55 @@ export function Radio({ onAdd }: { onAdd: (ids: string[]) => void }) {
         </div>
         <div>
           <span className="eyebrow">再生の基準になる曲</span>
-          <h2>{seed ? seed.title : "あなたの好きな一曲から。"}</h2>
-          <p>
-            {seed
-              ? `${seed.uploader} を基準におすすめ`
-              : "検索画面で曲の「その他の操作」から「この曲からラジオ」を選んでください。"}
-          </p>
+          <h2>{seed?.title || "基準曲を選んでください"}</h2>
+          {seed?.uploader && <p>{seed.uploader}</p>}
           <div className="actions">
-            <button
-              className="primary"
-              disabled={!seed}
-              onClick={() => {
-                if (seed) void store.startRadio(seed);
-              }}
-            >
-              <RadioIcon size={18} />
-              ラジオを開始
-            </button>
-            {data.radio && (
-              <button onClick={() => store.update((d) => ({ ...d, radio: false }))}>
-                ラジオを停止
+            {seed && (
+              <button className="primary" onClick={() => store.startRadio(seed)}>
+                <RadioIcon size={18} />
+                {data.radio && data.radioSeed !== seed.id ? "この基準曲で再開" : "ラジオを開始"}
               </button>
             )}
+            {data.radio && <button onClick={() => store.stopRadio()}>おすすめの自動追加を停止</button>}
           </div>
+          {data.radio && stateText && <p role="status">{stateText}</p>}
         </div>
+      </section>
+      <section className="panel radio-seed-picker">
+        <h3>{seed ? "基準曲を変更" : "曲を検索してラジオを始める"}</h3>
+        {fallback && (
+          <label>
+            保存した曲から選ぶ
+            <select value={chosen && !results.some((track) => track.id === selection) ? selection : ""} onChange={(e) => setSelection(e.target.value)}>
+              <option value="">基準曲の一覧</option>
+              {available(current) && <option value={current!.id}>現在の曲 · {current!.title}</option>}
+              {saved.map(({ label, ids }) => {
+                const tracks = ids.map((id) => data.tracks[id]).filter((track) => available(track));
+                return tracks.length > 0 && (
+                  <optgroup label={label} key={label}>
+                    {tracks.map((track) => <option key={track.id} value={track.id}>{track.title} · {track.uploader}</option>)}
+                  </optgroup>
+                );
+              })}
+            </select>
+          </label>
+        )}
+        <form className="searchform" onSubmit={(e) => { e.preventDefault(); void search(); }}>
+          <Search size={20} />
+          <input type="search" aria-label="ラジオの基準曲を検索" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="曲名・歌い手" />
+          <button type="submit" disabled={!query.trim()}>{busy ? "検索中…" : "検索"}</button>
+        </form>
+        {error && <p className="error" role="alert">{error}</p>}
+        {results.length > 0 && (
+          <div className="radio-seed-results" aria-label="基準曲の検索結果">
+            {results.map((track) => (
+              <button key={track.id} aria-pressed={selection === track.id} onClick={() => {
+                setSelection(track.id);
+                store.startRadio(track);
+              }}>{track.title} · {track.uploader}から開始</button>
+            ))}
+          </div>
+        )}
       </section>
       <section className="panel">
         <h3>おすすめの方向</h3>
@@ -71,7 +139,7 @@ export function Radio({ onAdd }: { onAdd: (ids: string[]) => void }) {
               className={data.settings.radioMode === value ? "selected" : ""}
               onClick={() => {
                 store.settings({ radioMode: value });
-                setCandidates([]);
+
               }}
             >
               {label}
@@ -79,8 +147,9 @@ export function Radio({ onAdd }: { onAdd: (ids: string[]) => void }) {
           ))}
         </div>
         <p className="muted">
-          再生履歴やお気に入りをもとに、次のおすすめを自動で探します。変更内容は次の候補から反映されます。
+          再生履歴やお気に入りをもとに、次のおすすめを探します。
         </p>
+        {!["balance", "discovery"].includes(data.settings.radioMode) && <p className="muted">現在の方向 · {modeLabels[data.settings.radioMode]}</p>}
         {data.channels.length > 0 && (
           <details>
             <summary>好みに登録した歌い手（{data.channels.length}件）</summary>
@@ -96,50 +165,23 @@ export function Radio({ onAdd }: { onAdd: (ids: string[]) => void }) {
           </details>
         )}
       </section>
-      <div className="section-heading">
-        <h2>
-          <Sparkles size={20} />
-          次のおすすめ
-        </h2>
-        <button
-          disabled={!seed || busy}
-          onClick={async () => {
-            if (!seed) return;
-            setBusy(true);
-            setError("");
-            try {
-              const result = await recommend(seed, store.data);
-              store.addTracks(result);
-              setCandidates(result);
-            } catch (e) {
-              setError(e instanceof Error ? e.message : String(e));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          <RefreshCw size={17} />
-          {busy ? "探しています…" : "候補を更新"}
-        </button>
-      </div>
-      {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
+      {data.radio && (
+        <>
+          <div className="section-heading">
+            <h2><Sparkles size={20} /> 次のおすすめ</h2>
+            {radioStatus.phase === "error" && (
+              <button onClick={() => store.retryRadio()}>
+                <RefreshCw size={17} /> おすすめを再試行
+              </button>
+            )}
+          </div>
+          {radioStatus.phase === "finding" && <p role="status">次のおすすめの音声を確認しています…</p>}
+          {radioStatus.message && <p className="error" role="alert">{radioStatus.message}</p>}
+          {upcoming.length > 0 && (
+            <TrackList tracks={upcoming} onAdd={onAdd} onPlay={(_, index) => store.selectQueue(data.current + 1 + index)} />
+          )}
+        </>
       )}
-      <TrackList
-        tracks={
-          candidates.length
-            ? candidates
-            : data.queue
-                .slice(data.current + 1)
-                .map((id) => data.tracks[id])
-                .filter(Boolean)
-        }
-        onAdd={onAdd}
-        onPlay={(track) => { void store.startRadio(track); }}
-      />
-
     </>
   );
 }

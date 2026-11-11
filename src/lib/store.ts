@@ -4,14 +4,15 @@ import {
   emptyData,
   newPlaylist,
   unique,
+  move,
   nextIndex,
   shuffleTail,
 } from "./model";
 import { readData, saveData, storageRevision } from "./storage";
-import { player, type PlaybackState } from "./player";
+import { player } from "./player";
 import { invidious } from "./invidious";
 import { recommend } from "./recommend";
-import { reliability, classify } from "./reliability";
+import { reliability } from "./reliability";
 import { QueueTraversal } from "./sequence";
 import { reconcileLocal, savedAudio } from "./local-audio";
 let data = emptyData();
@@ -21,7 +22,8 @@ let loaded = false;
 let savingBlocked = false;
 let revision = 0;
 let healthRevision = 0;
-let snapshot = { data, playback, notice, loaded, revision, healthRevision };
+let radioStatus: { phase: "idle" | "finding" | "ready" | "error"; message: string } = { phase: "idle", message: "" };
+let snapshot = { data, playback, notice, loaded, revision, healthRevision, radioStatus };
 const listeners = new Set<() => void>();
 let radioAbort: AbortController | undefined;
 let radioPending: Promise<void> | undefined;
@@ -32,8 +34,38 @@ function nextPreparedId(d: Data) {
   return index < 0 ? "" : d.queue[index] || "";
 }
 let radioEpoch = 0;
+function resetRadioWork() {
+  radioEpoch++;
+  radioAbort?.abort();
+  radioPending = undefined;
+  radioStatus = { phase: "idle", message: "" };
+}
+function radioSeed(d: Data) {
+  return d.tracks[d.radioSeed || ""] || d.tracks[d.queue[d.current]];
+}
+async function waitForRadio() {
+  while (data.radio) {
+    const epoch = radioEpoch;
+    const size = data.queue.length;
+    const job = store.fillRadio();
+    let change: () => void = () => {};
+    try {
+      await Promise.race([job, new Promise<void>((resolve) => {
+        change = () => {
+          if (epoch !== radioEpoch || data.queue.length > size) resolve();
+        };
+        listeners.add(change);
+      })]);
+    } finally {
+      listeners.delete(change);
+    }
+    if (data.queue.length > size || epoch === radioEpoch) return;
+  }
+}
 let lastPositionSave = 0;
 let nearEndPrepared = "";
+let waitingForRadio = false;
+let advanceRequest = 0;
 let previous: Data[] = [];
 let future: Data[] = [];
 function emit() {
@@ -44,6 +76,7 @@ function emit() {
     loaded,
     revision: ++revision,
     healthRevision,
+    radioStatus,
   };
   listeners.forEach((fn) => fn());
 }
@@ -91,8 +124,9 @@ export const store = {
       future = [];
     }
     data = nextData;
+    if (data.settings.instance !== invidious.preferred) invidious.preferred = data.settings.instance;
     if (oldNext !== nextPreparedId(data)) { prefetchAbort?.abort(); clearTimeout(prefetchTimer); }
-    if (wasRadio && !data.radio) { radioEpoch++; radioAbort?.abort(); radioPending = undefined; }
+    if (wasRadio && !data.radio) resetRadioWork();
     persist();
     emit();
     if (oldNext !== nextPreparedId(data) && playback.status === "playing") this.prepareNext();
@@ -119,6 +153,16 @@ export const store = {
     return p.id;
   },
   addToPlaylist(id: string, ids: string[]) {
+    const playlist = data.playlists.find((p) => p.id === id);
+    if (!playlist) {
+      this.notify("追加先が見つかりません。プレイリストを選び直してください。");
+      return;
+    }
+    ids = unique(ids).filter((id) => data.tracks[id] && !playlist.tracks.includes(id));
+    if (!ids.length) {
+      this.notify("選択した曲はこのプレイリストに登録済みです。");
+      return;
+    }
     this.update(
       (d) => ({
         ...d,
@@ -149,6 +193,8 @@ export const store = {
   enqueue(ids: string[], next = false) {
     this.update((d) => ({
       ...d,
+      current: Math.max(0, d.current),
+      radioGenerated: d.radioGenerated?.filter((id) => !ids.includes(id)),
       queue: next
         ? [
             ...d.queue.slice(0, d.current + 1),
@@ -159,9 +205,8 @@ export const store = {
     }));
   },
   playList(ids: string[], index = 0, disableRadio = false) {
-    radioAbort?.abort();
-    radioEpoch++;
-    radioPending = undefined;
+    if (!ids.length) return;
+    resetRadioWork();
     let queue = [...ids];
     if (data.shuffle) queue = shuffleTail(queue, index);
     this.update((d) => ({
@@ -170,10 +215,15 @@ export const store = {
       current: index,
       position: 0,
       radio: disableRadio ? false : d.radio,
+      radioSeed: undefined,
+      radioGenerated: [],
     }));
     void this.playCurrent();
+    if (data.radio) void this.fillRadio();
   },
   async playCurrent(position = 0, forceFirst = true) {
+    waitingForRadio = false;
+    advanceRequest++;
     nearEndPrepared = "";
     listenedId = "";
     prefetchAbort?.abort();
@@ -195,15 +245,30 @@ export const store = {
       void player.prefetch(id, data.settings, prefetchAbort.signal);
     }, 350);
   },
+  seek(position: number) {
+    const track = data.tracks[data.queue[data.current]];
+    if (!track) return;
+    if (playback.trackId === track.id && playback.engine && playback.status !== "loading") {
+      player.seek(position);
+      position = playback.position;
+    }
+    this.update((d) => ({ ...d, position }));
+  },
   toggle() {
-    if (playback.status === "playing" || playback.status === "loading")
+    if (!data.queue[data.current]) return;
+    if (waitingForRadio || playback.status === "playing" || playback.status === "loading")
       player.pause();
     else if (
       ["paused", "blocked"].includes(playback.status) &&
       playback.trackId === data.queue[data.current] &&
       playback.engine
     )
-      void player.play();
+      void player.play().then((result) => {
+        if (result.status === "playing") {
+          this.prepareNext();
+          void this.fillRadio();
+        }
+      });
     else void this.playCurrent(data.position);
   },
   next(ended = false) {
@@ -237,23 +302,29 @@ export const store = {
         };
       });
     }
+    const atRadioTail = data.radio && data.current + 1 >= data.queue.length &&
+      (!ended || data.repeat !== "one");
+    if (atRadioTail) {
+      if (waitingForRadio) return;
+      const request = ++advanceRequest;
+      waitingForRadio = true;
+      player.stop(false);
+      void traversal.run(data.current + 1, 0, false).finally(() => {
+        if (request === advanceRequest) waitingForRadio = false;
+      });
+      return;
+    }
     const index = nextIndex(data, ended);
     if (index < 0) {
       player.stop();
-      const epoch = radioEpoch;
-      if (data.radio)
-        void this.fillRadio().then(() => {
-          if (epoch !== radioEpoch) return;
-          if (data.queue.length > data.current + 1) this.next(true);
-        });
       return;
     }
     this.update((d) => ({ ...d, current: index, position: 0 }));
     void this.playCurrent(0, false);
   },
   previous() {
-    if (playback.position > 3) {
-      player.seek(0);
+    if (playback.engine && playback.trackId === data.queue[data.current] && playback.position > 3) {
+      this.seek(0);
       return;
     }
     if (data.current > 0) {
@@ -261,18 +332,31 @@ export const store = {
       void this.playCurrent();
     }
   },
+  selectQueue(index: number) {
+    if (index < 0 || index >= data.queue.length) return;
+    this.update((d) => ({ ...d, current: index, position: 0 }));
+    void this.playCurrent();
+  },
+  moveQueue(from: number, to: number) {
+    this.update((d) => {
+      const order = move(d.queue.map((_, index) => index), from, to);
+      return { ...d, queue: order.map((index) => d.queue[index]), current: order.indexOf(d.current) };
+    });
+  },
   removeQueue(index: number) {
+    if (index < 0 || index >= data.queue.length) return;
     const current = index === data.current;
+    const wasPlaying = ["playing", "loading"].includes(playback.status) || waitingForRadio;
     this.update((d) => ({
       ...d,
       queue: d.queue.filter((_, i) => i !== index),
-      current:
-        index < d.current
-          ? d.current - 1
-          : Math.min(d.current, d.queue.length - 2),
+      current: index < d.current ? d.current - 1 : Math.min(d.current, d.queue.length - 2),
+      position: current ? 0 : d.position,
+      radio: d.queue.length === 1 ? false : d.radio,
     }));
     if (current) {
-      if (data.current >= 0) void this.playCurrent();
+      listenedId = "";
+      if (data.current >= 0 && wasPlaying) void this.playCurrent();
       else player.stop();
     }
   },
@@ -284,63 +368,108 @@ export const store = {
     }));
   },
   settings(patch: Partial<Settings>) {
-    if (patch.radioMode || patch.discovery !== undefined) { radioEpoch++; radioAbort?.abort(); radioPending = undefined; }
-    if (patch.quality || patch.instance !== undefined) { prefetchAbort?.abort(); clearTimeout(prefetchTimer); }
-    this.update((d) => ({ ...d, settings: { ...d.settings, ...patch } }));
-    invidious.preferred = data.settings.instance;
+    const changedMode = patch.radioMode !== undefined && patch.radioMode !== data.settings.radioMode;
+    const changedAudio = patch.quality !== undefined || patch.instance !== undefined;
+    const refilter = changedMode || patch.discovery !== undefined || patch.weights !== undefined;
+    if (refilter || changedAudio) resetRadioWork();
+    if (changedAudio || patch.prefetch === false) {
+      prefetchAbort?.abort();
+      clearTimeout(prefetchTimer);
+    }
+    this.update((d) => ({
+      ...d,
+      settings: { ...d.settings, ...patch },
+      queue: d.radio && changedMode
+        ? d.queue.filter((id, index) => index <= d.current || !d.radioGenerated?.includes(id))
+        : d.queue,
+      radioGenerated: changedMode ? [] : d.radioGenerated,
+    }));
     this.prepareNext();
-    if (data.radio && patch.radioMode) void this.fillRadio();
+    if (data.radio && (refilter || changedAudio)) void this.fillRadio();
   },
-  async startRadio(track: Track) {
-    this.addTracks([track]);
-    this.update((d) => ({ ...d, radio: true }));
-    this.playList([track.id]);
+  startRadio(track: Track, mode = data.settings.radioMode) {
+    const keepPlaying = playback.status === "playing" && playback.trackId === track.id;
+    resetRadioWork();
+    this.update((d) => ({
+      ...d,
+      tracks: { ...d.tracks, [track.id]: track },
+      queue: [track.id],
+      current: 0,
+      position: keepPlaying ? playback.position : 0,
+      radio: true,
+      radioSeed: track.id,
+      radioGenerated: [],
+      settings: { ...d.settings, radioMode: mode },
+    }));
+    if (keepPlaying) traversal.cancel();
+    else void this.playCurrent();
+    void this.fillRadio();
+  },
+  stopRadio() {
+    if (waitingForRadio) {
+      traversal.cancel();
+      waitingForRadio = false;
+      advanceRequest++;
+    }
+    this.update((d) => ({ ...d, radio: false, radioGenerated: [] }));
+  },
+  retryRadio() {
+    if (!data.radio) return;
+    if (["idle", "ended", "error"].includes(playback.status)) this.next(true);
+    else void this.fillRadio();
   },
   async fillRadio() {
     if (!data.radio || data.queue.length - data.current > 4) return;
     if (radioPending) return radioPending;
-    const seed = data.tracks[data.queue[data.current]];
+    const current = data.tracks[data.queue[data.current]];
+    const fixedSeed = ["channel", "versions", "covers"].includes(data.settings.radioMode);
+    const seed = (fixedSeed ? radioSeed(data) : current) || radioSeed(data);
     if (!seed) return;
-    const epoch = radioEpoch;
-    radioAbort?.abort();
-    radioAbort = new AbortController();
-    const signal = radioAbort.signal;
+    const control = new AbortController();
+    radioAbort = control;
+    const { signal } = control;
+    const active = () => !signal.aborted && data.radio && radioAbort === control;
+    radioStatus = { phase: "finding", message: "" };
+    emit();
     const job = (async () => {
       try {
         const candidates = await recommend(seed, data, signal);
-        if (signal.aborted || epoch !== radioEpoch || !data.radio) return;
-        const good: Track[] = [];
-        const pool = candidates
-          .filter(
-            (t) =>
-              !reliability.isExcluded(t.id) &&
-              !data.queue.includes(t.id) &&
-              !data.disliked.includes(t.id),
-          )
-          .slice(0, 8);
-        // Decode candidates silently before they become radio queue entries. Metadata alone is insufficient.
-        for (let i = 0; i < pool.length && good.length < 3; i++) {
-          const results = await Promise.all(
-            pool.slice(i, i + 1).map(async (t) => ({
-              t,
-              prepared: t.source === "local" ? !!(await savedAudio(t.id)) : await player.prefetch(t.id, data.settings, signal, true),
-            })),
-          );
-          if (signal.aborted || epoch !== radioEpoch || !data.radio) return;
-          good.push(...results.filter((x) => x.prepared).map((x) => x.t));
+        if (!active()) return;
+        const eligible = (t: Track) =>
+          !data.queue.includes(t.id) && !data.disliked.includes(t.id) && !reliability.isExcluded(t.id);
+        const pool = candidates.filter(eligible).slice(0, 8);
+        const prepare = async (track: Track) => track.source === "local"
+          ? !!(await savedAudio(track.id))
+          : !!(await player.prefetch(track.id, data.settings, signal, true));
+        let added = 0;
+        // Publish each verified track while the next candidates are still being checked.
+        for (let i = 0; i < pool.length && added < 3; i += 2) {
+          const pair = pool.slice(i, i + 2).map((track) => ({
+            track, prepared: prepare(track).catch(() => false),
+          }));
+          for (const { track, prepared } of pair) {
+            if (!await prepared || !active() || !eligible(track)) continue;
+            added++;
+            this.update((d) => ({
+              ...d,
+              tracks: { ...d.tracks, [track.id]: track },
+              queue: [...d.queue, track.id],
+              radioGenerated: [...(d.radioGenerated || []), track.id],
+            }));
+            if (added === 3) break;
+          }
+          if (!active()) return;
         }
-        if (signal.aborted || epoch !== radioEpoch || !data.radio) return;
-        const accepted = good.filter(t => !data.disliked.includes(t.id) && !reliability.isExcluded(t.id));
-        this.addTracks(accepted);
-        const existing = new Set(data.queue);
-        this.enqueue(accepted.map((t) => t.id).filter((id) => !existing.has(id)));
-        if (!accepted.length)
-          this.notify(
-            "推薦候補は見つかりましたが、再生可能な音源を確認できませんでした。既存のキューは保持しています。",
-          );
+        if (!active()) return;
+        radioStatus = added
+          ? { phase: "ready", message: "" }
+          : { phase: "error", message: candidates.length
+            ? "候補の音声を再生できませんでした。接続を確認して再試行するか、別の基準曲を選んでください。"
+            : "次に再生できる曲が見つかりません。別の基準曲やおすすめの方向を選んでください。" };
       } catch (e) {
-        if (!signal.aborted)
-          this.notify(e instanceof Error ? e.message : String(e));
+        if (active()) radioStatus = { phase: "error", message: e instanceof Error ? e.message : String(e) };
+      } finally {
+        if (active()) emit();
       }
     })();
     radioPending = job;
@@ -356,9 +485,10 @@ export const store = {
     future.push(structuredClone(data));
     this.update((d) => ({
       ...d,
-      tracks: { ...d.tracks, ...prev.tracks },
+      tracks: { ...prev.tracks, ...d.tracks },
       playlists: prev.playlists,
       favorites: prev.favorites,
+      additions: prev.additions,
     }));
   },
   redo() {
@@ -367,13 +497,15 @@ export const store = {
     previous.push(structuredClone(data));
     this.update((d) => ({
       ...d,
-      tracks: { ...d.tracks, ...next.tracks },
+      tracks: { ...next.tracks, ...d.tracks },
       playlists: next.playlists,
       favorites: next.favorites,
+      additions: next.additions,
     }));
   },
   async flush() {
-    if (!savingBlocked && loaded) await saveData(data);
+    if (savingBlocked) throw Error("元データ保護のため自動保存を停止しています。バックアップを復元してください。");
+    if (loaded) await saveData(data);
   },
 };
 const traversal = new QueueTraversal({
@@ -381,7 +513,7 @@ const traversal = new QueueTraversal({
   current: () => data.current,
   track: (id) => data.tracks[id],
   excluded: (id) => data.tracks[id]?.source === "local" ? !data.tracks[id]?.local?.available : navigator.onLine === false || reliability.isExcluded(id),
-  wrap: () => data.repeat === "all",
+  wrap: () => data.repeat === "all" && !data.radio,
   select: (index) =>
     store.update((d) => ({ ...d, current: index, position: 0 })),
   load: async (t, position) => {
@@ -414,7 +546,7 @@ const traversal = new QueueTraversal({
     );
   },
   replenish: async () => {
-    if (data.radio) await store.fillRadio();
+    if (data.radio) await waitForRadio();
   },
   exhausted: (track, count) => {
     if (track)
@@ -427,12 +559,13 @@ const traversal = new QueueTraversal({
     );
   },
 });
-player.onIntent = () => {
+player.onIntent = (kind) => {
   traversal.cancel();
-  radioEpoch++;
-  radioAbort?.abort();
-  radioPending = undefined;
+  waitingForRadio = false;
+  advanceRequest++;
+  if (kind === "stop") resetRadioWork();
   prefetchAbort?.abort();
+  clearTimeout(prefetchTimer);
 };
 player.onTerminalFailure = (id) => {
   if (
@@ -455,11 +588,12 @@ reliability.onChange = () => {
 player.onState = (s) => {
   playback = s;
   emit();
-  if (s.status === "playing" && s.duration - s.position < 25 && nearEndPrepared !== s.trackId) {
+  if (s.status === "playing" && s.position > 0 && s.duration - s.position < 25 && nearEndPrepared !== s.trackId) {
     nearEndPrepared = s.trackId;
     store.prepareNext();
+    if (radioStatus.phase !== "error") void store.fillRadio();
   }
-  if (Date.now() - lastPositionSave > 5000) {
+  if (s.trackId === data.queue[data.current] && s.engine && Date.now() - lastPositionSave > 5000) {
     lastPositionSave = Date.now();
     data = { ...data, position: s.position };
     persist();
@@ -487,7 +621,7 @@ let thisSessionSeconds = 0;
 let counted = false;
 player.onListen = (seconds) => {
   const id = data.queue[data.current];
-  if (!id) return;
+  if (!id || id !== playback.trackId) return;
   if (listenedId !== id) {
     listenedId = id;
     thisSessionSeconds = 0;
@@ -544,13 +678,14 @@ if ("mediaSession" in navigator) {
     } catch {}
 }
 window.addEventListener("pagehide", () => {
-  data = { ...data, position: player.state.position };
+  if (player.state.engine && player.state.trackId === data.queue[data.current])
+    data = { ...data, position: player.audio.currentTime };
   if (!savingBlocked && loaded) {
     try {
       sessionStorage.setItem("musicpleasure-recovery", JSON.stringify({ ...data, __revision: storageRevision() }));
     } catch {}
   }
-  void store.flush();
+  void store.flush().catch(() => {});
 });
 window.addEventListener("online", () =>
   store.notify("接続が復旧しました。再生・検索を再試行できます。"),

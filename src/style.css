@@ -3102,3 +3102,7 @@ html[data-theme="light"] .topbar-search { color: #153c5c; background: #fff; bord
 @media (prefers-reduced-motion: reduce) {
   .hero-visual img, .playlist-art, .play-toggle, .home-shortcuts > a { transition: none; animation: none; }
 }
+
+.radio-seed-picker .searchform { margin: .75rem 0 0; }
+.radio-seed-results { display: grid; gap: .4rem; margin-top: .75rem; max-height: 19rem; overflow: auto; }
+.radio-seed-results button { justify-content: flex-start; text-align: left; min-width: 0; overflow-wrap: anywhere; }

@@ -17,6 +17,8 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
   const [filter, setFilter] = useState("all");
   const [submitted, setSubmitted] = useState("");
   const abort = useRef<AbortController | null>(null);
+  const suggestionRequest = useRef<AbortController | null>(null);
+  const lastSearch = useRef<() => Promise<void>>(async () => {});
   const request = useRef(0);
   useEffect(() => () => abort.current?.abort(), []);
   useEffect(() => {
@@ -25,11 +27,12 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
       return;
     }
     const c = new AbortController();
+    suggestionRequest.current = c;
     const timer = setTimeout(
       () =>
         void invidious
           .suggestions(query, c.signal)
-          .then(setSuggestions)
+          .then((items) => { if (!c.signal.aborted) setSuggestions(items); })
           .catch(() => {}),
       500,
     );
@@ -39,12 +42,16 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
     };
   }, [query]);
   async function search(q = query, more = false, type = filter) {
-    if (!q.trim()) return;
-    if (playlistId(q)) {
-      location.hash = "import";
+    q = q.trim();
+    if (!q) return;
+    const playlist = playlistId(q);
+    if (playlist && !videoId(q)) {
+      location.hash = "import/" + playlist;
       return;
     }
     abort.current?.abort();
+    suggestionRequest.current?.abort();
+    lastSearch.current = () => search(q, more, type);
     abort.current = new AbortController();
     const signal = abort.current.signal,
       token = ++request.current;
@@ -52,6 +59,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
     setError("");
     setSuggestions([]);
     if (!more) {
+      setSubmitted(q);
       setResults([]);
       setChannels([]);
       setNextpage(undefined);
@@ -80,7 +88,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
             "Invidiousから動画の詳細を取得できません。再生時に別のInvidious接続先で再取得します。",
           );
         }
-        if (token !== request.current) return;
+        if (signal.aborted || token !== request.current) return;
         store.addTracks([track]);
         setResults([track]);
       } else {
@@ -90,7 +98,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
           signal,
           type === "channel" ? "channels" : "videos",
         );
-        if (token !== request.current) return;
+        if (signal.aborted || token !== request.current) return;
         const tracks = page.items.map(fromItem).filter((t): t is Track => !!t);
         store.addTracks(tracks);
         setResults((prev) =>
@@ -98,12 +106,39 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
             ? [...new Map([...prev, ...tracks].map((t) => [t.id, t])).values()]
             : tracks,
         );
-        setChannels(page.items.filter((t) => t.type === "channel"));
+        const receivedChannels = page.items.filter((t) => t.type === "channel");
+        setChannels((previous) => [...new Map((more ? [...previous, ...receivedChannels] : receivedChannels)
+          .map((channel) => [channel.url, channel])).values()]);
         setNextpage(page.nextpage || undefined);
       }
       setSubmitted(q);
     } catch (e) {
       if (!signal.aborted) setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (token === request.current) setBusy(false);
+    }
+  }
+  async function openChannel(channel: InvidiousItem) {
+    if (!channel.url) return;
+    abort.current?.abort();
+    suggestionRequest.current?.abort();
+    const controller = new AbortController();
+    abort.current = controller;
+    const token = ++request.current;
+    lastSearch.current = () => openChannel(channel);
+    setBusy(true);
+    setError("");
+    setSuggestions([]);
+    try {
+      const tracks = await invidious.channel(channel.url, controller.signal);
+      if (controller.signal.aborted) return;
+      store.addTracks(tracks);
+      setChannels([]);
+      setNextpage(undefined);
+      setResults(tracks);
+      setFilter("all");
+    } catch (e) {
+      if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e));
     } finally {
       if (token === request.current) setBusy(false);
     }
@@ -128,12 +163,12 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
           aria-label="楽曲を検索"
           placeholder="曲名・歌い手・YouTube URL"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => { setQuery(e.target.value); setSuggestions([]); }}
         />
         <button
           className="primary"
           type="submit"
-          disabled={busy || !query.trim()}
+          disabled={!query.trim()}
         >
           {busy ? "検索中…" : "検索"}
         </button>
@@ -183,7 +218,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
       {error && (
         <div className="error" role="alert">
           <p>{error}</p>
-          <button onClick={() => void search()}>
+          <button onClick={() => void lastSearch.current()}>
             <RefreshCw size={16} />
             再試行
           </button>
@@ -224,6 +259,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
           <button
             onClick={() => {
               abort.current?.abort();
+              request.current++;
               setBusy(false);
             }}
           >
@@ -241,35 +277,28 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
           </button>
         </div>
       )}
-      <TrackList tracks={visible} onAdd={onAdd} selectable singlePlay />
+      {visible.length > 0 && <TrackList key={submitted} tracks={visible} onAdd={onAdd} selectable singlePlay />}
+      {!busy && !error && submitted && !visible.length && !channels.length && (
+        <p className="empty" role="status">検索結果がありません。別の語句で検索してください。</p>
+      )}
       {channels.map((c, i) => (
         <div key={i} className="panel">
           <b>{c.name}</b>
           <div className="actions">
             <button
+              aria-pressed={!!c.url && data.channels.includes(c.url)}
               onClick={() => {
-                if (c.url)
-                  store.update((d) => ({
-                    ...d,
-                    channels: [...new Set([...d.channels, c.url!])],
-                  }));
+                const url = c.url;
+                if (!url) return;
+                store.update((d) => ({
+                  ...d,
+                  channels: d.channels.includes(url) ? d.channels.filter((v) => v !== url) : [...d.channels, url],
+                }));
               }}
             >
-              歌い手を保存
+              {c.url && data.channels.includes(c.url) ? "歌い手の保存を解除" : "歌い手を保存"}
             </button>
-            <button
-              onClick={async () => {
-                try {
-                  const tracks = await invidious.channel(c.url || "");
-                  store.addTracks(tracks);
-                  setFilter("all");
-                  setChannels([]);
-                  setNextpage(undefined);
-                  setResults(tracks);
-                } catch (e) {
-                  setError(String(e));
-                }
-              }}
+            <button onClick={() => void openChannel(c)}
             >
               投稿曲を表示
             </button>

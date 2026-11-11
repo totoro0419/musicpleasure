@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Play,
@@ -40,7 +40,15 @@ export function TrackList({
 }) {
   const { data } = useStore();
   const parent = useRef<HTMLDivElement>(null);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selectionIds, setSelected] = useState<string[]>([]);
+  const visibleIds = new Set(tracks.map((track) => track.id));
+  const selected = selectionIds.filter((id) => visibleIds.has(id));
+  useEffect(() => {
+    if (selectionIds.length !== selected.length) {
+      setSelected(selected);
+      onSelection?.(selected);
+    }
+  }, [selectionIds, selected, onSelection]);
   const [open, setOpen] = useState<string | null>(null);
   const virtual = useVirtualizer({
     count: tracks.length,
@@ -58,19 +66,14 @@ export function TrackList({
       return;
     }
     if (queue) {
-      store.update((d) => ({
-        ...d,
-        current: index + queueOffset,
-        position: 0,
-      }));
-      void store.playCurrent();
+      store.selectQueue(index + queueOffset);
       return;
     }
     if (singlePlay) {
       store.playList([track.id], 0, true);
       return;
     }
-    store.playList(tracks.map((item) => item.id), index);
+    store.playList(tracks.map((item) => item.id), index, true);
   }
   function selection(id: string) {
     const next = selected.includes(id)
@@ -182,11 +185,18 @@ export function TrackList({
                 <details
                   className="trackmenu"
                   open={open === `${t.id}-${row.index}`}
-                  onToggle={(e) => {
-                    if (e.currentTarget.open) setOpen(`${t.id}-${row.index}`);
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setOpen(null);
+                      e.currentTarget.querySelector("summary")?.focus();
+                    }
                   }}
                 >
-                  <summary aria-label={`${t.title}のその他の操作`} title="その他の操作">•••</summary>
+                  <summary aria-label={`${t.title}のその他の操作`} title="その他の操作" onClick={(e) => {
+                    e.preventDefault();
+                    const key = `${t.id}-${row.index}`;
+                    setOpen((value) => value === key ? null : key);
+                  }}>•••</summary>
                   <div className="menuitems">
                     <button
                       onClick={() => {
@@ -228,8 +238,7 @@ export function TrackList({
                     </button>
                     <button
                       onClick={() => {
-                        store.settings({ radioMode: "channel" });
-                        void store.startRadio(t);
+                        store.startRadio(t, "channel");
                         setOpen(null);
                       }}
                     >
@@ -238,8 +247,7 @@ export function TrackList({
                     </button>
                     <button
                       onClick={() => {
-                        store.settings({ radioMode: "versions" });
-                        void store.startRadio(t);
+                        store.startRadio(t, "versions");
                         setOpen(null);
                       }}
                     >

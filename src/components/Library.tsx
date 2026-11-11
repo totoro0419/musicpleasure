@@ -38,10 +38,12 @@ export function Library({
   id,
   onAdd,
   initialTab = "playlists",
+  initialPlaylistUrl,
 }: {
   id?: string;
   onAdd: (ids: string[]) => void;
   initialTab?: "playlists" | "local" | "import";
+  initialPlaylistUrl?: string;
 }) {
   const { data } = useStore();
   const [name, setName] = useState("");
@@ -98,7 +100,7 @@ export function Library({
               <button
                 className="primary"
                 disabled={!tracks.length}
-                onClick={() => store.playList(p.tracks)}
+                onClick={() => store.playList(p.tracks, 0, true)}
               >
                 <Play size={18} fill="currentColor" />
                 再生
@@ -107,7 +109,7 @@ export function Library({
                 disabled={!tracks.length}
                 onClick={() => {
                   if (!store.data.shuffle) store.shuffle();
-                  store.playList(p.tracks);
+                  store.playList(p.tracks, 0, true);
                 }}
               >
                 シャッフル再生
@@ -423,7 +425,7 @@ export function Library({
         />
       )}
       {tab === "local" && <LocalLibrary onAdd={onAdd} />}
-      {tab === "import" && <ImportPanel />}
+      {tab === "import" && <ImportPanel initialPlaylistUrl={initialPlaylistUrl} />}
     </>
   );
 }

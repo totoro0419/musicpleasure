@@ -493,10 +493,8 @@ export class MusicPlayer {
   }
   pause() {
     this.onIntent("pause");
-    if (this.state.status === "loading") {
-      this.abort?.abort();
-      this.epoch++;
-    }
+    this.abort?.abort();
+    this.epoch++;
     this.wantsPlay = false;
     this.audio.pause();
     this.armWatchdog(false);
