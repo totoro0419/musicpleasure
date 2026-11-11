@@ -6,6 +6,8 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  E2E_CHROME_CHANNEL: chrome
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -18,7 +20,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-      - run: npx playwright install --with-deps chromium
+      - run: google-chrome --version
       - run: npm run test:e2e
       - uses: actions/upload-artifact@v4
         if: always()
@@ -57,7 +59,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - run: google-chrome --version
       - name: Actual public media verification (no mocks)
         env:
           LIVE_TESTS: "1"
@@ -82,7 +84,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: npx playwright install --with-deps chromium
+      - run: google-chrome --version
       - name: Actual candidate media verification (no mocks)
         env:
           LIVE_TESTS: "1"
