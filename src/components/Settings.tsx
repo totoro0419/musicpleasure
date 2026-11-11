@@ -19,6 +19,7 @@ export function Settings({
   const [backup, setBackup] = useState<Data | null>(null);
   const [error, setError] = useState("");
   const [custom, setCustom] = useState("");
+  const [confirmReset, setConfirmReset] = useState(false);
   const [checking, setChecking] = useState(false);
   const [audioChecking, setAudioChecking] = useState(false);
   const [audioCheckId, setAudioCheckId] = useState("jfKfPfyJRdk");
@@ -44,7 +45,7 @@ export function Settings({
         <section className="panel">
           <h2>再生</h2>
           <p className="muted">
-            Invidious音声再生専用。再生できない場合は別のInvidious接続先へ切り替えます。
+            オンライン音楽はInvidiousで再生し、保存した音源はオフラインでも再生できます。
           </p>
           <label>
             音声品質
@@ -73,7 +74,10 @@ export function Settings({
               <option value="light">ライト</option>
             </select>
           </label>
-          <label><input type="checkbox" checked={data.settings.prefetch !== false} onChange={e => store.settings({ prefetch: e.target.checked })} />次曲の事前読み込み</label>
+          <details>
+            <summary>通信量と読み込みの詳細設定</summary>
+            <label><input type="checkbox" checked={data.settings.prefetch !== false} onChange={e => store.settings({ prefetch: e.target.checked })} />次曲の事前読み込み</label>
+          </details>
           <p className="muted">
             形式は端末の対応状況から選択します。MP3変換は行いません。
           </p>
@@ -88,6 +92,14 @@ export function Settings({
             JSONには音声ファイルを含みません。「保存した音楽」から音声を別に書き出してください。
           </p>
           <div className="actions">
+            <button onClick={async () => {
+              try {
+                const allowed = await navigator.storage?.persist?.();
+                store.notify(allowed
+                  ? "この端末で保存データの自動削除を抑制する許可を得ました。元の音声も保管してください。"
+                  : "このブラウザでは保存保護を利用できません。元の音声ファイルを保管してください。");
+              } catch(e) { store.notify(e instanceof Error ? e.message : String(e)); }
+            }}>オフライン音声の保存を保護</button>
             <button onClick={exportData}>
               <Download size={18} />
               JSONを書き出す
@@ -207,8 +219,9 @@ export function Settings({
             保存済みの音源はオフラインで再生できます。オンライン曲の再生・検索には通信が必要です。
           </p>
         </section>
-        <section className="panel">
-          <h2>推薦の重み</h2>
+        <details className="panel">
+          <summary>おすすめの詳細調整</summary>
+          <p className="muted">通常は自動のまま使用できます。数値は必要な場合だけ変更してください。</p>
           {Object.entries(data.settings.weights).map(([key, value]) => (
             <label key={key}>
               {
@@ -238,23 +251,29 @@ export function Settings({
               />
             </label>
           ))}
-          <button
-            onClick={() => {
-              store.update((d) => ({ ...d, disliked: [], listening: {} }));
-              store.notify(
-                "好みの学習をリセットしました。お気に入りは保持しています。",
-              );
-            }}
-          >
+          <button onClick={() => setConfirmReset(true)}>
             好みの学習をリセット
           </button>
-        </section>
+          {confirmReset && (
+            <div className="confirmation" role="group" aria-label="推薦の学習リセットの確認">
+              <p>再生履歴から学習した好みと「興味なし」の記録をリセットします。お気に入りやプレイリストは残ります。</p>
+              <button className="danger" onClick={() => {
+                store.update((d) => ({ ...d, disliked: [], listening: {} }));
+                setConfirmReset(false);
+                store.notify("好みの学習をリセットしました。お気に入りは保持しています。");
+              }}>リセットを確定</button>
+              <button onClick={() => setConfirmReset(false)}>キャンセル</button>
+            </div>
+          )}
+        </details>
       </div>
-      <section className="panel">
+      <details className="panel troubleshooting">
+        <summary>再生できないときの接続設定・診断</summary>
+        <p className="muted">音が出ない場合にだけ確認してください。接続先は通常、自動で選ばれます。</p>
         <div className="section-heading">
           <h2>
             <Server size={20} />
-            Invidiousの接続状態
+            接続状況
           </h2>
           <button
             disabled={checking}
@@ -421,7 +440,7 @@ export function Settings({
             </button>
           </div>
         </details>
-      </section>
+      </details>
     </>
   );
 }

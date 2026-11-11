@@ -58,7 +58,9 @@ test("library / URL import / persistence / undo / command preview", async ({
   await expect(page.locator(".playlist-card")).toHaveCount(1);
   await page.getByRole("button", { name: "やり直す", exact: true }).click();
   await expect(page.locator(".playlist-card")).toHaveCount(2);
-  await goto(page, "import");
+  await goto(page, "library");
+  await page.locator(".playlist-card").getByText("取り込んだ曲", { exact: true }).click();
+  await page.getByRole("button", { name: "まとめて編集", exact: true }).click();
   await page.getByLabel("操作内容").fill("曲名順に並べ替え");
   await page.getByRole("button", { name: "変更をプレビュー" }).click();
   await expect(
@@ -328,6 +330,9 @@ test("UI quality: home actions are obvious and directly navigate to their destin
 test("UI quality: technical connection details are opt-in, not shown by default", async ({ page }) => {
   await mocks(page);
   await page.goto("./#settings");
+  const troubleshooting = page.locator(".troubleshooting");
+  await expect(troubleshooting).not.toHaveAttribute("open");
+  await troubleshooting.locator("summary").first().click();
   const details = page.locator(".advanced-instance-list");
   await expect(details).toBeVisible();
   await expect(details).not.toHaveAttribute("open");
@@ -374,4 +379,83 @@ test("mini player can be dismissed and restored across routes and reloads", asyn
   await expect(page.getByRole("button", { name: "ミニプレーヤーを閉じる" })).toBeVisible();
   await page.reload();
   await expect(page.locator(".playerbar")).toBeVisible();
+});
+
+test("search chooses between videos and channels without misleading cover or official filters", async ({ page }) => {
+  await mocks(page);
+  const modes: string[] = [];
+  await page.route("https://**/api/v1/search?*", async (route) => {
+    const url = new URL(route.request().url());
+    modes.push(url.searchParams.get("type") || "");
+    await route.fulfill({
+      headers: { "access-control-allow-origin": "*" },
+      json: url.searchParams.get("type") === "channel"
+        ? [{ type: "channel", author: "Singer", authorId: "UCexample", authorUrl: "/channel/UCexample" }]
+        : [{ type: "video", videoId: id1, title: "Test Cover A", author: "Singer", lengthSeconds: 60, videoThumbnails: [] }],
+    });
+  });
+  await page.goto("./#search");
+  await expect(page.getByRole("button", { name: "公式曲のみ" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "歌ってみた優先" })).toHaveCount(0);
+  await page.getByLabel("楽曲を検索").fill("Singer");
+  await page.getByRole("button", { name: "検索", exact: true }).click();
+  await expect(page.locator(".trackrow")).toHaveCount(1);
+  await page.getByRole("button", { name: "チャンネル", exact: true }).click();
+  await expect.poll(() => modes.at(-1)).toBe("channel");
+  await page.getByRole("button", { name: "曲・動画", exact: true }).click();
+  await expect.poll(() => modes.at(-1)).toBe("video");
+  await expect(page.locator(".trackrow")).toHaveCount(1);
+});
+
+test("library uses four main navigation items, integrates tools, and protects playlist deletion", async ({ page }) => {
+  await mocks(page);
+  await page.goto("./#library");
+  const nav = page.locator(".sidebar nav[aria-label='メインナビゲーション'] a");
+  await expect(nav).toHaveCount(4);
+  await expect(page.getByRole("button", { name: "歌い手", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "曲を追加", exact: true }).click();
+  await expect(page.getByLabel("曲一覧", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "オフライン音楽", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "保存した音楽" })).toBeVisible();
+  await page.getByRole("button", { name: "プレイリスト", exact: true }).click();
+  await page.getByLabel("新しいプレイリスト名").fill("確認用");
+  await page.getByRole("button", { name: "作成", exact: true }).click();
+  await page.getByRole("button", { name: "編集", exact: true }).click();
+  await page.getByRole("button", { name: "プレイリスト削除" }).click();
+  await expect(page.getByRole("button", { name: "削除を確定" })).toBeVisible();
+  await page.getByRole("button", { name: "キャンセル" }).click();
+  await expect(page.getByRole("heading", { name: "確認用" })).toBeVisible();
+});
+
+test("radio offers simple choices and keeps detailed artist actions in song menus", async ({ page }) => {
+  await mocks(page);
+  await page.goto("./#radio");
+  await expect(page.getByRole("button", { name: "おまかせ" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "新しい曲を多めに" })).toBeVisible();
+  await expect(page.getByText(/発見度/)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "歌ってみた特化" })).toHaveCount(0);
+  await page.goto("./#search");
+  await page.getByLabel("楽曲を検索").fill("Test Cover");
+  await page.getByRole("button", { name: "検索", exact: true }).click();
+  await page.locator(".trackrow").first().locator("summary").click();
+  await expect(page.getByRole("button", { name: "この歌い手の曲を続けて聴く" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "この曲の別バージョンを探す" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "この曲はおすすめしない" })).toHaveCount(0);
+});
+
+test("queue clear requires confirmation and never removes playlists", async ({ page }) => {
+  await mocks(page);
+  await page.goto("./#search");
+  await page.getByLabel("楽曲を検索").fill("Test Cover");
+  await page.getByRole("button", { name: "検索", exact: true }).click();
+  await page.getByRole("button", { name: "すべて再生", exact: true }).click();
+  await page.goto("./#queue");
+  await expect(page.locator(".trackrow")).toHaveCount(2);
+  await page.getByRole("button", { name: "キューを空にする" }).click();
+  await expect(page.locator(".trackrow")).toHaveCount(2);
+  await page.getByRole("button", { name: "キャンセル" }).click();
+  await expect(page.locator(".trackrow")).toHaveCount(2);
+  await page.getByRole("button", { name: "キューを空にする" }).click();
+  await page.getByRole("button", { name: "削除を確定" }).click();
+  await expect(page.locator(".trackrow")).toHaveCount(0);
 });

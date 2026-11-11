@@ -228,13 +228,35 @@ export function TrackList({
                     </button>
                     <button
                       onClick={() => {
-                        store.dislike(t.id);
+                        store.settings({ radioMode: "channel" });
+                        void store.startRadio(t);
                         setOpen(null);
                       }}
                     >
-                      <ThumbsDown size={16} />
-                      興味なし
+                      <Radio size={16} />
+                      この歌い手の曲を続けて聴く
                     </button>
+                    <button
+                      onClick={() => {
+                        store.settings({ radioMode: "versions" });
+                        void store.startRadio(t);
+                        setOpen(null);
+                      }}
+                    >
+                      <Radio size={16} />
+                      この曲の別バージョンを探す
+                    </button>
+                    {(t.reason || onPlay) && (
+                      <button
+                        onClick={() => {
+                          store.dislike(t.id);
+                          setOpen(null);
+                        }}
+                      >
+                        <ThumbsDown size={16} />
+                        この曲はおすすめしない
+                      </button>
+                    )}
                     {t.uploaderUrl && (
                       <button
                         onClick={() => {
@@ -247,7 +269,7 @@ export function TrackList({
                           setOpen(null);
                         }}
                       >
-                        歌い手を保存 / 解除
+                        {data.channels.includes(t.uploaderUrl!) ? "歌い手の好み登録を解除" : "この歌い手を好みに登録"}
                       </button>
                     )}
                     {reorder && (
