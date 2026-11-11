@@ -10,6 +10,7 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
     "Explicit PC/tablet live service verification",
   );
   test.setTimeout(720000);
+  page.setDefaultTimeout(12000);
   const results: Array<Record<string, unknown>> = [];
   const report: Record<string, unknown> = {
     at: new Date().toISOString(),
@@ -82,6 +83,7 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
   try {
     expect(tracks.length).toBeGreaterThanOrEqual(10);
     expect(tracks.filter((t) => t.cover).length).toBeGreaterThanOrEqual(5);
+    console.log("LIVE_BEGIN", info.project.name, report.url);
     await page.goto("./#settings");
     await page.getByText("再生できないときの接続設定・診断", { exact: true }).click();
     await page

@@ -121,7 +121,7 @@ export function TrackList({
           {rows.map((row) => {
             const t = tracks[row.index];
             if (!t) return null;
-            const active = data.queue[data.current] === t.id;
+            const active = queue ? row.index + queueOffset === data.current : data.queue[data.current] === t.id;
             return (
               <div
                 className={`trackrow ${active ? "active" : ""}`}

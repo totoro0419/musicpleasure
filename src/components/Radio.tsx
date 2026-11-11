@@ -4,6 +4,7 @@ import { store, useStore } from "../lib/store";
 import type { RadioMode, Track } from "../types";
 import { invidious } from "../lib/invidious";
 import { fromItem, unique } from "../lib/model";
+import { recommend } from "../lib/recommend";
 import { TrackList } from "./TrackList";
 export const modeLabels: Record<RadioMode, string> = {
   favorites: "お気に入り中心",
@@ -20,6 +21,10 @@ export function Radio({ onAdd }: { onAdd: (ids: string[]) => void }) {
   const [results, setResults] = useState<Track[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [preview, setPreview] = useState<{ key: string; tracks: Track[] }>();
+  const [previewBusy, setPreviewBusy] = useState("");
+  const [previewError, setPreviewError] = useState<{ key: string; message: string }>();
+  const previewRequest = useRef<AbortController | undefined>(undefined);
   const searchRequest = useRef<AbortController | undefined>(undefined);
   useEffect(() => () => searchRequest.current?.abort(), []);
   const current = data.tracks[data.queue[data.current]];
@@ -29,11 +34,34 @@ export function Radio({ onAdd }: { onAdd: (ids: string[]) => void }) {
     { label: "プレイリスト", ids: unique(data.playlists.flatMap((p) => p.tracks)) },
   ], [data.favorites, data.history, data.playlists]);
   const available = (track?: Track) => track && (track.source !== "local" || track.local?.available);
-  const fallback = [data.radioSeed, current?.id, ...saved.flatMap((group) => group.ids)]
+  const fallback = [data.radio ? data.radioSeed : current?.id, current?.id, data.radioSeed, ...saved.flatMap((group) => group.ids)]
     .find((id) => id && available(data.tracks[id]));
   const chosen = selection ? (data.tracks[selection] || results.find((track) => track.id === selection)) : undefined;
   const seed = available(chosen) ? chosen : fallback ? data.tracks[fallback] : undefined;
+  const previewKey = data.radio ? "" : `${seed?.id || ""}:${data.settings.radioMode}`;
+  useEffect(() => () => previewRequest.current?.abort(), [previewKey]);
+  async function updatePreview() {
+    if (!seed) return;
+    previewRequest.current?.abort();
+    const controller = new AbortController();
+    previewRequest.current = controller;
+    setPreviewBusy(previewKey);
+    setPreviewError(undefined);
+    try {
+      const tracks = await recommend(seed, store.data, controller.signal);
+      if (!controller.signal.aborted) {
+        if (tracks.length) store.addTracks(tracks);
+        setPreview({ key: previewKey, tracks });
+        if (!tracks.length) setPreviewError({ key: previewKey, message: "おすすめが見つかりませんでした。別の基準曲でお試しください。" });
+      }
+    } catch (e) {
+      if (!controller.signal.aborted) setPreviewError({ key: previewKey, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      if (previewRequest.current === controller) setPreviewBusy("");
+    }
+  }
   const upcoming = data.radio ? data.queue.slice(data.current + 1).map((id) => data.tracks[id]).filter(Boolean) : [];
+  const previewTracks = preview?.key === previewKey ? preview.tracks : [];
   const stateText = playback.status === "loading" ? "曲を準備中…"
     : playback.status === "playing" ? "再生中"
     : playback.status === "paused" ? "一時停止中"
@@ -137,10 +165,7 @@ export function Radio({ onAdd }: { onAdd: (ids: string[]) => void }) {
               key={value}
               aria-pressed={data.settings.radioMode === value}
               className={data.settings.radioMode === value ? "selected" : ""}
-              onClick={() => {
-                store.settings({ radioMode: value });
-
-              }}
+              onClick={() => store.settings({ radioMode: value })}
             >
               {label}
             </button>
@@ -165,20 +190,32 @@ export function Radio({ onAdd }: { onAdd: (ids: string[]) => void }) {
           </details>
         )}
       </section>
-      {data.radio && (
+      {seed && (
         <>
           <div className="section-heading">
             <h2><Sparkles size={20} /> 次のおすすめ</h2>
-            {radioStatus.phase === "error" && (
+            {data.radio && radioStatus.phase === "error" ? (
               <button onClick={() => store.retryRadio()}>
                 <RefreshCw size={17} /> おすすめを再試行
               </button>
+            ) : (
+              <button
+                disabled={data.radio ? radioStatus.phase === "finding" : previewBusy === previewKey}
+                onClick={() => data.radio ? store.refreshRadio() : void updatePreview()}
+              >
+                <RefreshCw size={17} /> 候補を更新
+              </button>
             )}
           </div>
-          {radioStatus.phase === "finding" && <p role="status">次のおすすめの音声を確認しています…</p>}
-          {radioStatus.message && <p className="error" role="alert">{radioStatus.message}</p>}
+          {(data.radio ? radioStatus.phase === "finding" : previewBusy === previewKey) &&
+            <p role="status">{data.radio ? "次のおすすめの音声を確認しています…" : "候補を探しています…"}</p>}
+          {data.radio && radioStatus.message && <p className="error" role="alert">{radioStatus.message}</p>}
+          {!data.radio && previewError?.key === previewKey && <p className="error" role="alert">{previewError.message}</p>}
           {upcoming.length > 0 && (
             <TrackList tracks={upcoming} onAdd={onAdd} onPlay={(_, index) => store.selectQueue(data.current + 1 + index)} />
+          )}
+          {previewTracks.length > 0 && !data.radio && (
+            <TrackList tracks={previewTracks} onAdd={onAdd} onPlay={(track) => store.startRadio(track)} />
           )}
         </>
       )}

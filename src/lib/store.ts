@@ -40,6 +40,10 @@ function resetRadioWork() {
   radioPending = undefined;
   radioStatus = { phase: "idle", message: "" };
 }
+function withoutUpcomingRecommendations(d: Data) {
+  const generated = new Set(d.radioGenerated);
+  return d.queue.filter((id, index) => index <= d.current || !generated.has(id));
+}
 function radioSeed(d: Data) {
   return d.tracks[d.radioSeed || ""] || d.tracks[d.queue[d.current]];
 }
@@ -380,7 +384,7 @@ export const store = {
       ...d,
       settings: { ...d.settings, ...patch },
       queue: d.radio && changedMode
-        ? d.queue.filter((id, index) => index <= d.current || !d.radioGenerated?.includes(id))
+        ? withoutUpcomingRecommendations(d)
         : d.queue,
       radioGenerated: changedMode ? [] : d.radioGenerated,
     }));
@@ -388,6 +392,7 @@ export const store = {
     if (data.radio && (refilter || changedAudio)) void this.fillRadio();
   },
   startRadio(track: Track, mode = data.settings.radioMode) {
+    if (data.radio && data.radioSeed === track.id && data.settings.radioMode === mode && playback.status === "loading") return;
     const keepPlaying = playback.status === "playing" && playback.trackId === track.id;
     resetRadioWork();
     this.update((d) => ({
@@ -412,6 +417,12 @@ export const store = {
       advanceRequest++;
     }
     this.update((d) => ({ ...d, radio: false, radioGenerated: [] }));
+  },
+  refreshRadio() {
+    if (!data.radio) return;
+    resetRadioWork();
+    this.update((d) => ({ ...d, queue: withoutUpcomingRecommendations(d), radioGenerated: [] }));
+    this.retryRadio();
   },
   retryRadio() {
     if (!data.radio) return;
@@ -593,7 +604,7 @@ player.onState = (s) => {
     store.prepareNext();
     if (radioStatus.phase !== "error") void store.fillRadio();
   }
-  if (s.trackId === data.queue[data.current] && s.engine && Date.now() - lastPositionSave > 5000) {
+  if (s.trackId === data.queue[data.current] && s.engine && s.status !== "loading" && Date.now() - lastPositionSave > 5000) {
     lastPositionSave = Date.now();
     data = { ...data, position: s.position };
     persist();

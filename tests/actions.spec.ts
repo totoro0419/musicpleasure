@@ -190,3 +190,28 @@ test("queue order, volume and settings survive reload and the exported backup co
   expect(backup.playlists[0].tracks).toEqual(backup.queue);
   expect(backup.settings.prefetch).toBe(false);
 });
+
+test("playlist edit, cover, deletion and undo change saved data", async ({ page }) => {
+  await mockMusic(page);
+  await page.goto("./#library");
+  await page.getByLabel("新しいプレイリスト名").fill("Before edit");
+  await page.getByRole("button", { name: "作成", exact: true }).click();
+  await page.getByRole("button", { name: "編集", exact: true }).click();
+  await page.getByLabel("プレイリスト名", { exact: true }).fill("After edit");
+  await page.getByLabel("説明文", { exact: true }).fill("Saved description");
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+X2GQAAAAASUVORK5CYII=", "base64");
+  await page.getByLabel("カバー画像を選ぶ").setInputFiles({ name: "cover.png", mimeType: "image/png", buffer: png });
+  await expect(page.locator("main img[src^='data:image/']")).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "After edit", exact: true })).toBeVisible();
+  await expect(page.getByText("Saved description")).toBeVisible();
+  await expect(page.locator("main img[src^='data:image/']")).toBeVisible();
+  await page.getByRole("button", { name: "編集", exact: true }).click();
+  await page.getByRole("button", { name: "プレイリスト削除" }).click();
+  await page.getByRole("button", { name: "削除を確定" }).click();
+  await expect(page.locator(".playlist-card")).toHaveCount(0);
+  await page.getByRole("button", { name: "元に戻す", exact: true }).click();
+  await expect(page.locator(".playlist-card")).toContainText("After edit");
+  await page.getByRole("button", { name: "やり直す", exact: true }).click();
+  await expect(page.locator(".playlist-card")).toHaveCount(0);
+});

@@ -86,3 +86,13 @@ describe("Invidious HTTP and fallback",()=>{
   expect(fetchSpy).not.toHaveBeenCalled();
  });
 });
+it("skips a fast server with an invalid response and keeps the valid search result", async () => {
+  const client = new InvidiousClient();
+  client.health = [health("https://bad.test"), health("https://good.test")];
+  vi.spyOn(client, "record").mockImplementation(() => {});
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => new Response(JSON.stringify(
+    input.includes("bad") ? { status: "success" } : [{ type: "video", videoId, title: "Song" }],
+  ))));
+  expect((await client.search("song")).items[0].url).toContain(videoId);
+  expect(client.health[0].failure).toBe(1);
+});

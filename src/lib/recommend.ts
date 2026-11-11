@@ -104,10 +104,6 @@ export function rankCandidates(
       };
     })
     .sort((a, b) => b.score - a.score)
-    .filter(
-      (t, i, a) =>
-        i < 2 || a[i - 1].uploader !== t.uploader || mode === "channel",
-    )
     .slice(0, 15);
 }
 export async function recommend(seed: Track, data: Data, signal?: AbortSignal) {
@@ -140,7 +136,7 @@ export async function recommend(seed: Track, data: Data, signal?: AbortSignal) {
     else errors++;
   }
   let ranked = rankCandidates(pool, seed, data);
-  if (ranked.length < 4 && !signal?.aborted) {
+  if (ranked.length < 2 && !signal?.aborted) {
     try {
       pool.push(...await search(mode === "versions" ? `${core} acoustic live remix` : `${seed.uploader || core} ${mode === "covers" ? "歌ってみた" : "音楽"}`));
       ranked = rankCandidates(pool, seed, data);
