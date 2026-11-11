@@ -22,7 +22,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
   const request = useRef(0);
   useEffect(() => () => abort.current?.abort(), []);
   useEffect(() => {
-    if (query.length < 2) {
+    if (query.length < 2 || query.trim() === submitted) {
       setSuggestions([]);
       return;
     }
@@ -40,7 +40,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
       clearTimeout(timer);
       c.abort();
     };
-  }, [query]);
+  }, [query, submitted]);
   async function search(q = query, more = false, type = filter) {
     q = q.trim();
     if (!q) return;

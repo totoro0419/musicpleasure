@@ -2207,7 +2207,9 @@ html[data-theme="light"] .selected {
     font-size: 9px;
   }
   .trackrow > .favorite {
-    display: none;
+    flex: 0 0 44px;
+    width: 44px;
+    min-height: 44px;
   }
   .duration {
     font-size: 9px;

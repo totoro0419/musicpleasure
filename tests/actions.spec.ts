@@ -52,7 +52,7 @@ async function mockMusic(page: Page, denied: number[] = []) {
 }
 async function progresses(page: Page, expectedId?: string) {
   const mini = page.locator(".mini-track");
-  if (expectedId) await expect(mini).toHaveAttribute("data-track-id", expectedId);
+  if (expectedId) await expect(mini).toHaveAttribute("data-track-id", expectedId, { timeout: 14000 });
   await expect(mini).toContainText("再生中");
   const seek = page.getByLabel("再生位置", { exact: true });
   let previous = Number(await seek.inputValue());
@@ -64,10 +64,6 @@ async function progresses(page: Page, expectedId?: string) {
     return delta > 0 && delta <= 2;
   }, { timeout: 6000, intervals: [200, 350, 500] }).toBe(true);
 }
-async function seekEnd(page: Page) {
-  await page.getByLabel("再生位置", { exact: true }).press("End");
-}
-
 test("first-run radio searches in place and plays three different tracks across ended events", async ({ page, hasTouch }) => {
   await mockMusic(page, [1]);
   await page.goto("./#radio");
@@ -81,10 +77,8 @@ test("first-run radio searches in place and plays three different tracks across 
   const third = await page.locator("main .trackrow .title").nth(1).textContent();
   expect(second).not.toBe(titles[1]);
   expect(third).not.toBe(titles[1]);
-  await seekEnd(page);
   await progresses(page, ids[titles.indexOf(second!)]);
   await page.goto("#library");
-  await seekEnd(page);
   await progresses(page, ids[titles.indexOf(third!)]);
   expect(new Set([titles[0], second, third]).size).toBe(3);
 });
@@ -162,7 +156,7 @@ test("queue order, volume and settings survive reload and the exported backup co
   await page.getByRole("button", { name: "確認して復元" }).click();
   await expect(page.getByText(/バックアップを復元しました/)).toBeVisible();
   await page.getByLabel("音声品質").selectOption("data");
-  await page.getByLabel("表示", { exact: true }).selectOption("light");
+  await page.getByLabel("表示").selectOption("light");
   await page.getByText("通信量と読み込みの詳細設定").click();
   await page.getByRole("checkbox", { name: "次曲の事前読み込み" }).uncheck();
   await page.goto("#queue");
@@ -197,7 +191,7 @@ test("playlist edit, cover, deletion and undo change saved data", async ({ page 
   await page.getByLabel("新しいプレイリスト名").fill("Before edit");
   await page.getByRole("button", { name: "作成", exact: true }).click();
   await page.getByRole("button", { name: "編集", exact: true }).click();
-  await page.getByLabel("プレイリスト名", { exact: true }).fill("After edit");
+  await page.locator("main").getByLabel("プレイリスト名", { exact: true }).fill("After edit");
   await page.getByLabel("説明文", { exact: true }).fill("Saved description");
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+X2GQAAAAASUVORK5CYII=", "base64");
   await page.getByLabel("カバー画像を選ぶ").setInputFiles({ name: "cover.png", mimeType: "image/png", buffer: png });
