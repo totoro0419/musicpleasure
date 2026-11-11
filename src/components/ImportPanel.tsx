@@ -238,7 +238,7 @@ export function ImportPanel() {
               <button
                 className="primary"
                 disabled={busy}
-                onClick={() => {
+                onClick={async () => {
                   store.addTracks(preview);
                   if (target)
                     store.addToPlaylist(
@@ -259,7 +259,12 @@ export function ImportPanel() {
                       }),
                       true,
                     );
-                  store.notify("取得済みの曲を登録しました");
+                  try {
+                    await store.flush();
+                    store.notify("取得済みの曲を登録しました");
+                  } catch (error) {
+                    setError(error instanceof Error ? error.message : String(error));
+                  }
                 }}
               >
                 この{preview.length}曲を取り込む

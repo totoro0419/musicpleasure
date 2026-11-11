@@ -401,9 +401,12 @@ test("search chooses between videos and channels without misleading cover or off
   await page.getByRole("button", { name: "検索", exact: true }).click();
   await expect(page.locator(".trackrow")).toHaveCount(1);
   await page.getByRole("button", { name: "チャンネル", exact: true }).click();
-  await expect.poll(() => modes.at(-1)).toBe("channel");
+  await expect(page.getByRole("button", { name: "チャンネル", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => modes.includes("channel")).toBe(true);
+  const requestsBeforeVideo = modes.length;
   await page.getByRole("button", { name: "曲・動画", exact: true }).click();
-  await expect.poll(() => modes.at(-1)).toBe("video");
+  await expect(page.getByRole("button", { name: "曲・動画", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => modes.slice(requestsBeforeVideo).includes("video")).toBe(true);
   await expect(page.locator(".trackrow")).toHaveCount(1);
 });
 

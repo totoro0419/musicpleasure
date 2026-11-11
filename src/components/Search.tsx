@@ -165,7 +165,6 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
             className={filter === id ? "selected" : ""}
             aria-pressed={filter === id}
             onClick={() => {
-              if (filter === id) return;
               setFilter(id);
               const term = query.trim() || submitted;
               if (term) void search(term, false, id);
