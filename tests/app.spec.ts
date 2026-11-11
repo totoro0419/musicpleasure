@@ -403,11 +403,12 @@ test("search chooses between videos and channels without misleading cover or off
   await page.getByRole("button", { name: "チャンネル", exact: true }).click();
   await expect(page.getByRole("button", { name: "チャンネル", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect.poll(() => modes.includes("channel")).toBe(true);
-  const requestsBeforeVideo = modes.length;
+  await expect(page.locator(".trackrow")).toHaveCount(0);
   await page.getByRole("button", { name: "曲・動画", exact: true }).click();
   await expect(page.getByRole("button", { name: "曲・動画", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect.poll(() => modes.slice(requestsBeforeVideo).includes("video")).toBe(true);
+  // Cached video search results are reused without a second network request.
   await expect(page.locator(".trackrow")).toHaveCount(1);
+  await expect(page.locator(".trackrow")).toContainText("Test Cover A");
 });
 
 test("library uses four main navigation items, integrates tools, and protects playlist deletion", async ({ page }) => {
