@@ -79,12 +79,12 @@ export function LocalLibrary({ onAdd }: { onAdd: (ids: string[]) => void }) {
     finally { setBusy(false); await refresh(); }
   }
   return <>
-    <div className="page-intro"><div className="eyebrow"><HardDrive size={16} /> OFFLINE MUSIC</div><h1>保存した音楽</h1><p>自分の音声ファイルを取り込んで、通信なしでも聴けます。</p></div>
+    <div className="page-intro"><div className="eyebrow"><HardDrive size={16} /> OFFLINE MUSIC</div><h2>保存した音楽</h2><p>自分の音声ファイルを取り込んで、通信なしでも聴けます。</p></div>
     <section className="panel local-import">
       <h2><FolderOpen size={21} /> 音声ファイルを取り込む</h2>
       <p className="muted">MP3・M4A・AAC・Ogg・WAV・FLAC・WebM（端末が再生できる形式、1曲128MBまで）。複数選択できます。</p>
       <div className="actions"><label className={`button primary file-button ${busy ? "disabled" : ""}`}><Music2 size={18} /> 音声を選択<input aria-label="取り込む音声ファイル" type="file" accept="audio/*,.mp3,.m4a,.aac,.ogg,.opus,.wav,.flac,.webm" multiple disabled={busy} onChange={e => { const files = Array.from(e.target.files || []); e.target.value = ""; void run(files); }} /></label>
-        <button onClick={async () => { try { const allowed = await navigator.storage?.persist?.(); store.notify(allowed ? "保存データの自動削除を抑止しました" : "このブラウザでは保存保護が許可されませんでした。元の音声を保管してください。"); await refresh(); } catch (e) { store.notify(String(e)); } }}>保存データを保護</button>
+
         {busy && <button onClick={() => abort.current?.abort()}>取り込みを中断</button>}</div>
       {busy && <div role="status"><p>{progress.name}</p><progress aria-label="音声取り込みの進捗" value={progress.total ? progress.done : undefined} max={progress.total || 1} /><p>{progress.total && progress.total < 10000 ? `${progress.done} / ${progress.total}件` : `${bytes(progress.done)}取得`}</p></div>}
       {!!results.length && <div className="import-results" role="status">{results.map((r, i) => <p key={i}>{r}</p>)}{progress.done < progress.total && !busy && <p>保存済みの曲は残っています。同じファイルを選択すると未保存分だけ追加します。</p>}</div>}

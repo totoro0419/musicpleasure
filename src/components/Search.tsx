@@ -4,7 +4,6 @@ import type { Track, InvidiousItem } from "../types";
 import { invidious } from "../lib/invidious";
 import { fromItem, videoId, placeholder, playlistId } from "../lib/model";
 import { store, useStore } from "../lib/store";
-import { isCover } from "../lib/recommend";
 import { TrackList } from "./TrackList";
 export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
   const { data } = useStore();
@@ -39,7 +38,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
       c.abort();
     };
   }, [query]);
-  async function search(q = query, more = false) {
+  async function search(q = query, more = false, type = filter) {
     if (!q.trim()) return;
     if (playlistId(q)) {
       location.hash = "import";
@@ -85,12 +84,11 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
         store.addTracks([track]);
         setResults([track]);
       } else {
-        const sq = filter === "covers" ? `${q} 歌ってみた cover` : q;
         const page = await invidious.search(
-          sq,
+          q,
           more ? nextpage : undefined,
           signal,
-          filter === "channel" ? "channels" : "videos",
+          type === "channel" ? "channels" : "videos",
         );
         if (token !== request.current) return;
         const tracks = page.items.map(fromItem).filter((t): t is Track => !!t);
@@ -110,18 +108,7 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
       if (token === request.current) setBusy(false);
     }
   }
-  const visible =
-    filter === "official"
-      ? results.filter(
-          (t) =>
-            t.verified ||
-            /official|公式|topic|vevo/i.test(`${t.title} ${t.uploader}`),
-        )
-      : filter === "covers"
-        ? [...results].sort(
-            (a, b) => Number(isCover(b.title)) - Number(isCover(a.title)),
-          )
-        : results;
+  const visible = results;
   return (
     <>
       <div className="page-intro">
@@ -167,19 +154,26 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
           ))}
         </div>
       )}
-      <div className="chips" role="group" aria-label="検索フィルター">
+      <div className="chips" role="group" aria-label="検索対象">
         {[
-          ["all", "すべて"],
-          ["official", "公式曲のみ"],
-          ["covers", "歌ってみた優先"],
+          ["all", "曲・動画"],
           ["channel", "チャンネル"],
         ].map(([id, label]) => (
           <button
             key={id}
+            type="button"
             className={filter === id ? "selected" : ""}
             aria-pressed={filter === id}
             onClick={() => {
               setFilter(id);
+              const term = query.trim() || submitted;
+              if (term) void search(term, false, id);
+              else {
+                setResults([]);
+                setChannels([]);
+                setNextpage(undefined);
+                setSubmitted("");
+              }
             }}
           >
             {label}
@@ -268,6 +262,9 @@ export function Search({ onAdd }: { onAdd: (ids: string[]) => void }) {
                 try {
                   const tracks = await invidious.channel(c.url || "");
                   store.addTracks(tracks);
+                  setFilter("all");
+                  setChannels([]);
+                  setNextpage(undefined);
                   setResults(tracks);
                 } catch (e) {
                   setError(String(e));

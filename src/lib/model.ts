@@ -98,6 +98,8 @@ export function fromItem(item: import("../types").InvidiousItem): Track | null {
     : null;
 }
 export function safeImage(url: string) {
+  if (/^data:image\/(?:webp|png|jpeg);base64,[a-zA-Z0-9+/=]+$/.test(url) && url.length <= 450_000)
+    return url;
   try {
     return new URL(url).protocol === "https:" ? url : "";
   } catch {

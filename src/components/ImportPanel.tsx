@@ -4,8 +4,6 @@ import { store, useStore } from "../lib/store";
 import {
   parseList,
   resolveItem,
-  planCommand,
-  type CommandPlan,
 } from "../lib/importer";
 import { playlistId, newPlaylist } from "../lib/model";
 import { fetchPlaylist, playlistJob } from "../lib/playlist-import";
@@ -15,15 +13,12 @@ export function ImportPanel() {
   const [target, setTarget] = useState(data.playlists[0]?.id || "");
   const [busy, setBusy] = useState(false);
   const cancel = useRef<AbortController | null>(null);
-  const [command, setCommand] = useState("");
-  const [plan, setPlan] = useState<CommandPlan | null>(null);
   const [playlistURL, setPlaylistURL] = useState("");
   const job = data.playlistImport;
   const preview = job?.tracks || [];
   const playlistName = job?.name || "YouTubeから取り込み";
   const [error, setError] = useState("");
   useEffect(() => () => cancel.current?.abort(), []);
-  useEffect(() => setPlan(null), [target]);
   const items = data.importJob;
   async function run(reset = false) {
     setError("");
@@ -243,7 +238,7 @@ export function ImportPanel() {
               <button
                 className="primary"
                 disabled={busy}
-                onClick={() => {
+                onClick={async () => {
                   store.addTracks(preview);
                   if (target)
                     store.addToPlaylist(
@@ -264,7 +259,12 @@ export function ImportPanel() {
                       }),
                       true,
                     );
-                  store.notify("取得済みの曲を登録しました");
+                  try {
+                    await store.flush();
+                    store.notify("取得済みの曲を登録しました");
+                  } catch (error) {
+                    setError(error instanceof Error ? error.message : String(error));
+                  }
                 }}
               >
                 この{preview.length}曲を取り込む
@@ -272,54 +272,7 @@ export function ImportPanel() {
             </>
           )}
         </section>
-        <section className="panel">
-          <h3>
-            <Sparkles size={18} /> ことばで整理
-          </h3>
-          <p className="muted">端末内で日本語を解析します。作成・名前変更・追加・削除・移動・結合・複製・並べ替え・抽出・重複整理に対応します。対象は上の登録先で選択したリストです。</p>
-          <details><summary>操作の例を見る</summary><p>「通学」を作って / 名前を「夜」に変更 / 「曲名」を追加 / 「歌い手」を削除 / お気に入りを「通学」へ移動 / 「別のリスト」と結合 / 「コピー」として複製 / アーティスト順に並べ替え / 時間の長い順にソート / 5分以上の曲を抽出 / 歌ってみたを抽出 / 重複を整理</p></details>
-          <label>
-            操作内容
-            <input
-              value={command}
-              onChange={(e) => {
-                setCommand(e.target.value);
-                setPlan(null);
-              }}
-              placeholder="「歌い手名」を抽出 / 曲名順に並べ替え"
-            />
-          </label>
-          <button
-            onClick={() => {
-              try {
-                setPlan(planCommand(command, target, data));
-                setError("");
-              } catch (e) {
-                setError(e instanceof Error ? e.message : String(e));
-              }
-            }}
-          >
-            変更をプレビュー
-          </button>
-          {plan && (
-            <div className="confirmation">
-              <p>{plan.description}</p>
-              <button
-                className="primary"
-                onClick={() => {
-                  try {
-                    store.update(plan.execute, true);
-                    setPlan(null);
-                    store.notify("変更しました。元に戻すで取り消せます。");
-                  } catch(e) { setError(e instanceof Error ? e.message : String(e)); setPlan(null); }
-                }}
-              >
-                この変更を実行
-              </button>
-              <button onClick={() => setPlan(null)}>キャンセル</button>
-            </div>
-          )}
-        </section>
+
       </div>
     </div>
   );

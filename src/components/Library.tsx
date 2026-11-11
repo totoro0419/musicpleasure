@@ -3,7 +3,6 @@ import {
   Play,
   Plus,
   Music2,
-  Heart,
   Copy,
   Trash2,
   Search,
@@ -12,6 +11,9 @@ import {
 import { store, useStore } from "../lib/store";
 import { move, newPlaylist, time, unique, safeImage } from "../lib/model";
 import { TrackList } from "./TrackList";
+import { LocalLibrary } from "./LocalLibrary";
+import { ImportPanel } from "./ImportPanel";
+import { PlaylistCommands } from "./PlaylistCommands";
 export function PlaylistCard({ id }: { id: string }) {
   const { data } = useStore();
   const p = data.playlists.find((p) => p.id === id);
@@ -27,7 +29,7 @@ export function PlaylistCard({ id }: { id: string }) {
       </div>
       <b>{p.name}</b>
       <span>
-        {p.tracks.length}曲 {p.favorite ? " · ♥" : ""}
+        {p.tracks.length}曲
       </span>
     </a>
   );
@@ -35,18 +37,22 @@ export function PlaylistCard({ id }: { id: string }) {
 export function Library({
   id,
   onAdd,
+  initialTab = "playlists",
 }: {
   id?: string;
   onAdd: (ids: string[]) => void;
+  initialTab?: "playlists" | "local" | "import";
 }) {
   const { data } = useStore();
   const [name, setName] = useState("");
-  const [tab, setTab] = useState("playlists");
+  const [tab, setTab] = useState<string>(initialTab);
   const [search, setSearch] = useState("");
   const [selection, setSelection] = useState<string[]>([]);
   const [destination, setDestination] = useState("");
   const [merge, setMerge] = useState("");
   const [editing, setEditing] = useState(false);
+  const [showCommands, setShowCommands] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const p = data.playlists.find((x) => x.id === id);
   function patch(value: Partial<typeof p>) {
     store.update(
@@ -98,22 +104,22 @@ export function Library({
                 再生
               </button>
               <button
-                onClick={() => store.shuffle()}
-                aria-pressed={data.shuffle}
+                disabled={!tracks.length}
+                onClick={() => {
+                  if (!store.data.shuffle) store.shuffle();
+                  store.playList(p.tracks);
+                }}
               >
-                シャッフル {data.shuffle ? "ON" : "OFF"}
-              </button>
-              <button
-                className="icon"
-                aria-label="プレイリストをお気に入り"
-                onClick={() => patch({ favorite: !p.favorite })}
-              >
-                <Heart size={19} fill={p.favorite ? "currentColor" : "none"} />
+                シャッフル再生
               </button>
               <button onClick={() => setEditing(!editing)}>編集</button>
+              <button aria-expanded={showCommands} onClick={() => setShowCommands(!showCommands)}>
+                まとめて編集
+              </button>
             </div>
           </div>
         </div>
+        {showCommands && <PlaylistCommands playlistId={p.id} />}
         {editing && (
           <section className="panel">
             <div className="formgrid">
@@ -125,18 +131,60 @@ export function Library({
                 />
               </label>
               <label>
-                カバー画像URL
+                カバー画像を選ぶ
                 <input
-                  value={p.cover}
-                  onChange={(e) => patch({ cover: e.target.value })}
-                  onBlur={(e) => {
-                    if (e.target.value && !safeImage(e.target.value)) {
-                      store.notify("カバー画像はHTTPS URLを入力してください");
-                      patch({ cover: "" });
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (!file) return;
+                    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 2_000_000) {
+                      store.notify("PNG・JPEG・WebPの2MB以下の画像を選んでください");
+                      return;
+                    }
+                    const objectUrl = URL.createObjectURL(file);
+                    try {
+                      const image = new Image();
+                      image.src = objectUrl;
+                      await image.decode();
+                      if (!image.width || !image.height || image.width * image.height > 16_000_000) {
+                        throw Error("画像が大きすぎるか読み込めません");
+                      }
+                      const scale = Math.min(1, 512 / Math.max(image.width, image.height));
+                      const canvas = document.createElement("canvas");
+                      canvas.width = Math.max(1, Math.round(image.width * scale));
+                      canvas.height = Math.max(1, Math.round(image.height * scale));
+                      const context = canvas.getContext("2d");
+                      if (!context) throw Error("画像を処理できません");
+                      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+                      const cover = canvas.toDataURL("image/webp", 0.72);
+                      if (!safeImage(cover)) throw Error("画像を小さくできませんでした");
+                      patch({ cover });
+                    } catch (error) {
+                      store.notify(error instanceof Error ? error.message : String(error));
+                    } finally {
+                      URL.revokeObjectURL(objectUrl);
                     }
                   }}
                 />
               </label>
+              <details>
+                <summary>画像URLで指定する</summary>
+                <label>
+                  カバー画像URL
+                  <input
+                    value={p.cover.startsWith("data:") ? "" : p.cover}
+                    onChange={(e) => patch({ cover: e.target.value })}
+                    onBlur={(e) => {
+                      if (e.target.value && !safeImage(e.target.value)) {
+                        store.notify("画像はHTTPS URLを入力してください");
+                        patch({ cover: "" });
+                      }
+                    }}
+                  />
+                </label>
+              </details>
               <label>
                 説明文
                 <textarea
@@ -193,20 +241,25 @@ export function Library({
               </button>
               <button
                 className="danger"
-                onClick={() => {
-                  store.update(
-                    (d) => ({
-                      ...d,
-                      playlists: d.playlists.filter((x) => x.id !== p.id),
-                    }),
-                    true,
-                  );
-                  location.hash = "library";
-                }}
+                onClick={() => setConfirmDelete(true)}
               >
                 <Trash2 size={17} />
                 プレイリスト削除
               </button>
+              {confirmDelete && (
+                <div className="confirmation" role="group" aria-label="プレイリスト削除の確認">
+                  <p>「{p.name}」を削除しますか？ 曲の履歴や保存済み音声は削除されません。</p>
+                  <button className="danger" onClick={() => {
+                    store.update((d) => ({
+                      ...d,
+                      playlists: d.playlists.filter((x) => x.id !== p.id),
+                    }), true);
+                    setConfirmDelete(false);
+                    location.hash = "library";
+                  }}>削除を確定</button>
+                  <button onClick={() => setConfirmDelete(false)}>キャンセル</button>
+                </div>
+              )}
             </div>
           </section>
         )}
@@ -298,16 +351,16 @@ export function Library({
     <>
       <div className="page-intro">
         <div className="eyebrow">YOUR COLLECTION</div>
-        <h1>好きな音を、手元に。</h1>
-        <p>プレイリストも、聴いてきた曲も。ここから。</p>
+        <h1>ライブラリ</h1>
+        <p>プレイリスト・お気に入り・保存した音楽をここで管理できます。</p>
       </div>
       <div className="chips">
-        <a className="button" href="#local">保存した音楽・音声取り込み</a>
         {[
           ["playlists", "プレイリスト"],
           ["favorites", "お気に入り"],
           ["history", "再生履歴"],
-          ["channels", "歌い手"],
+          ["local", "オフライン音楽"],
+          ["import", "曲を追加"],
         ].map(([id, label]) => (
           <button
             className={tab === id ? "selected" : ""}
@@ -369,32 +422,8 @@ export function Library({
           onAdd={onAdd}
         />
       )}
-      {tab === "channels" && (
-        <div className="panel">
-          {data.channels.length ? (
-            data.channels.map((c) => (
-              <div className="section-heading" key={c}>
-                <span>
-                  {Object.values(data.tracks).find((t) => t.uploaderUrl === c)
-                    ?.uploader || c}
-                </span>
-                <button
-                  onClick={() =>
-                    store.update((d) => ({
-                      ...d,
-                      channels: d.channels.filter((x) => x !== c),
-                    }))
-                  }
-                >
-                  解除
-                </button>
-              </div>
-            ))
-          ) : (
-            <p>曲の「•••」から好きな歌い手を保存できます。</p>
-          )}
-        </div>
-      )}
+      {tab === "local" && <LocalLibrary onAdd={onAdd} />}
+      {tab === "import" && <ImportPanel />}
     </>
   );
 }

@@ -15,11 +15,13 @@ test("automatic multi-page playlist preview and Japanese changes are usable from
  await expect(page.getByText("[Private video]：非公開",{exact:true})).toBeVisible();
  await page.getByRole("button",{name:"この100曲を取り込む",exact:true}).click();
  await page.reload();await expect(page.getByText(/全ページ取得完了/)).toBeVisible();
- await page.getByLabel("登録先プレイリスト").selectOption({label:"Automatic Import"});
+ await page.goto("./#library");
+ await page.locator(".playlist-card").getByText("Automatic Import",{exact:true}).click();
+ await page.getByRole("button",{name:"まとめて編集",exact:true}).click();
  await page.getByLabel("操作内容").fill("名前を「Night」に変更して");await page.getByRole("button",{name:"変更をプレビュー",exact:true}).click();
  await expect(page.getByText(/「Automatic Import」の名前を「Night」へ変更/)).toBeVisible();await page.getByRole("button",{name:"この変更を実行",exact:true}).click();
- await page.getByRole("button",{name:"元に戻す",exact:true}).click();await expect(page.getByLabel("登録先プレイリスト")).toContainText("Automatic Import");
- await page.getByRole("button",{name:"やり直す",exact:true}).click();await expect(page.getByLabel("登録先プレイリスト")).toContainText("Night");
+ await page.getByRole("button",{name:"元に戻す",exact:true}).click();await expect(page.getByRole("heading",{name:"Automatic Import",exact:true})).toBeVisible();
+ await page.getByRole("button",{name:"やり直す",exact:true}).click();await expect(page.getByRole("heading",{name:"Night",exact:true})).toBeVisible();
  await page.getByLabel("操作内容").fill("適当に削除して");await page.getByRole("button",{name:"変更をプレビュー",exact:true}).click();
  await expect(page.getByText(/対象を特定できません/)).toBeVisible();await expect(page.getByRole("button",{name:"この変更を実行",exact:true})).toHaveCount(0);
 });

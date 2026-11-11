@@ -32,10 +32,8 @@ import { move, time } from "./lib/model";
 import { Search } from "./components/Search";
 import { Library, PlaylistCard } from "./components/Library";
 import { Radio, modeLabels } from "./components/Radio";
-import { ImportPanel } from "./components/ImportPanel";
 import { Settings } from "./components/Settings";
 import { TrackList } from "./components/TrackList";
-import { LocalLibrary } from "./components/LocalLibrary";
 interface InstallPrompt extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: string }>;
@@ -44,9 +42,7 @@ const nav = [
   { id: "home", label: "ホーム", icon: Home },
   { id: "search", label: "探す", icon: SearchIcon },
   { id: "library", label: "ライブラリ", icon: LibraryIcon },
-  { id: "local", label: "保存した音楽", icon: Download },
   { id: "radio", label: "ラジオ", icon: RadioIcon },
-  { id: "import", label: "一括登録", icon: Sparkles },
 ];
 function HomePage({ onAdd }: { onAdd: (ids: string[]) => void }) {
   const { data } = useStore();
@@ -74,7 +70,7 @@ function HomePage({ onAdd }: { onAdd: (ids: string[]) => void }) {
         </a>
         <a href="#import">
           <span className="shortcut-symbol shortcut-import"><Sparkles size={22}/></span>
-          <span><b>曲をまとめて登録</b><small>曲名やURLを貼り付ける</small></span>
+          <span><b>曲を追加</b><small>曲名やURLをまとめて貼り付ける</small></span>
           <ChevronRight size={18}/>
         </a>
       </nav>
@@ -124,12 +120,11 @@ function NowPlaying({ onAdd }: { onAdd: (ids: string[]) => void }) {
           <section className="nowplaying">
             {t.thumbnail ? <img className="album" src={t.thumbnail} alt="" /> : <div className="album local-art"><Music2 size={72} /></div>}
             <div>
-              <span className="eyebrow">NOW PLAYING</span>
+              <span className="eyebrow">再生中</span>
               <h2>{t.title}</h2>
               <p>{t.uploader}</p>
               <p className="muted">
-                {modeLabels[data.settings.radioMode]} · ラジオ{" "}
-                {data.radio ? "ON" : "OFF"}
+                {data.radio ? `${modeLabels[data.settings.radioMode]}でラジオ再生中` : t.source === "local" ? "オフライン音楽" : "オンライン再生"}
               </p>
               <div className="actions">
                 <button onClick={() => store.previous()}><SkipBack size={18} />前の曲</button>
@@ -210,6 +205,7 @@ function NowPlaying({ onAdd }: { onAdd: (ids: string[]) => void }) {
 export default function App() {
   const { data, playback, notice, loaded } = useStore();
   const [route, setRoute] = useState(location.hash.slice(1) || "home");
+  const [showClearQueue, setShowClearQueue] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
   const [install, setInstall] = useState<InstallPrompt | null>(null);
   const [update, setUpdate] = useState<ServiceWorker | null>(null);
@@ -310,6 +306,7 @@ export default function App() {
   }
   const current = data.tracks[data.queue[data.current]];
   const active = route.split("/")[0];
+  const navigationActive = ["local", "import", "playlist"].includes(active) ? "library" : active;
   const repeatIcon = data.repeat === "one" ? Repeat1 : Repeat;
   const RepeatIcon = repeatIcon;
   const isPlaying = playback.status === "playing";
@@ -342,12 +339,12 @@ export default function App() {
             <a
               key={n.id}
               className={
-                active === n.id || (n.id === "library" && active === "playlist")
+                navigationActive === n.id
                   ? "active"
                   : ""
               }
               href={`#${n.id}`}
-              aria-current={active === n.id || (n.id === "library" && active === "playlist") ? "page" : undefined}
+              aria-current={navigationActive === n.id ? "page" : undefined}
             >
               <n.icon size={21} />
               <span>{n.label}</span>
@@ -401,7 +398,7 @@ export default function App() {
         <header className="topbar">
           <span className="breadcrumb">
             <b>
-              {nav.find((n) => n.id === active)?.label ||
+              {nav.find((n) => n.id === navigationActive)?.label ||
                 (active === "settings"
                   ? "設定"
                   : active === "queue"
@@ -413,22 +410,26 @@ export default function App() {
           </span>
           <div className="topbar-actions">
             <a className="topbar-search" href="#search" aria-label="曲を検索する"><SearchIcon size={18}/><span>曲を検索</span></a>
-            <button
-              className="icon"
-              disabled={!store.canUndo}
-              aria-label="元に戻す"
-              onClick={() => store.undo()}
-            >
-              <Undo2 size={19} />
-            </button>
-            <button
-              className="icon"
-              disabled={!store.canRedo}
-              aria-label="やり直す"
-              onClick={() => store.redo()}
-            >
-              <Redo2 size={19} />
-            </button>
+            {(store.canUndo || store.canRedo) && (
+              <>
+                <button
+                  className="icon"
+                  disabled={!store.canUndo}
+                  aria-label="元に戻す"
+                  onClick={() => store.undo()}
+                >
+                  <Undo2 size={19} />
+                </button>
+                <button
+                  className="icon"
+                  disabled={!store.canRedo}
+                  aria-label="やり直す"
+                  onClick={() => store.redo()}
+                >
+                  <Redo2 size={19} />
+                </button>
+              </>
+            )}
             <a href="#settings" className="icon topbar-settings" aria-label="設定"><SettingsIcon size={21}/></a>
           </div>
         </header>
@@ -461,14 +462,15 @@ export default function App() {
             <div className="loading">ライブラリを開いています…</div>
           ) : active === "search" ? (
             <Search onAdd={onAdd} />
-          ) : active === "library" || active === "playlist" ? (
-            <Library key={route} id={route.split("/")[1]} onAdd={onAdd} />
-          ) : active === "local" ? (
-            <LocalLibrary onAdd={onAdd} />
+          ) : ["library", "playlist", "local", "import"].includes(active) ? (
+            <Library
+              key={route}
+              id={active === "playlist" ? route.split("/")[1] : undefined}
+              initialTab={active === "local" ? "local" : active === "import" ? "import" : "playlists"}
+              onAdd={onAdd}
+            />
           ) : active === "radio" ? (
             <Radio onAdd={onAdd} />
-          ) : active === "import" ? (
-            <ImportPanel />
           ) : active === "settings" ? (
             <Settings
               onInstall={() => void doInstall()}
@@ -495,19 +497,28 @@ export default function App() {
                   キューを保存
                 </button>
                 <button
-                  onClick={() => {
-                    player.stop();
-                    store.update((d) => ({
-                      ...d,
-                      queue: [],
-                      current: -1,
-                      position: 0,
-                      radio: false,
-                    }));
-                  }}
+                  disabled={!data.queue.length}
+                  onClick={() => setShowClearQueue(true)}
                 >
                   キューを空にする
                 </button>
+                {showClearQueue && (
+                  <div className="confirmation" role="group" aria-label="再生キュー削除の確認">
+                    <p>再生を停止して、キューの{data.queue.length}曲をすべて消しますか？ プレイリストは残ります。</p>
+                    <button className="danger" onClick={() => {
+                      player.stop();
+                      store.update((d) => ({
+                        ...d,
+                        queue: [],
+                        current: -1,
+                        position: 0,
+                        radio: false,
+                      }));
+                      setShowClearQueue(false);
+                    }}>削除を確定</button>
+                    <button onClick={() => setShowClearQueue(false)}>キャンセル</button>
+                  </div>
+                )}
               </div>
               <TrackList
                 tracks={data.queue.map((id) => data.tracks[id]).filter(Boolean)}
@@ -696,9 +707,7 @@ export default function App() {
               player.volume(v);
             }}
           />
-          <span className="engine-badge">
-            {playback.engine === "local" ? "OFFLINE" : playback.engine === "invidious" ? "Invidious" : "AUDIO"}
-          </span>
+
         </div>
         {(playback.message ||
           playback.status === "error" ||
@@ -720,7 +729,7 @@ export default function App() {
       <nav className="mobile-nav" aria-label="モバイルナビゲーション">
         {nav.filter(n => ["home", "search", "library", "radio"].includes(n.id)).map((n) => (
           <a
-            className={active === n.id ? "active" : ""}
+            className={navigationActive === n.id ? "active" : ""}
             key={n.id}
             href={`#${n.id}`}
           >
@@ -728,10 +737,7 @@ export default function App() {
             <span>{n.label}</span>
           </a>
         ))}
-        <a href="#import" className={active === "import" ? "active" : ""}>
-          <Sparkles size={21} />
-          <span>一括登録</span>
-        </a>
+
       </nav>
       <dialog ref={dialog} onCancel={() => setAddIds([])}>
         <form

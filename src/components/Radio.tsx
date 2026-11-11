@@ -50,44 +50,51 @@ export function Radio({ onAdd }: { onAdd: (ids: string[]) => void }) {
               <RadioIcon size={18} />
               ラジオを開始
             </button>
-            <button
-              aria-pressed={data.radio}
-              onClick={() => store.update((d) => ({ ...d, radio: !d.radio }))}
-            >
-              自動補充 {data.radio ? "ON" : "OFF"}
-            </button>
+            {data.radio && (
+              <button onClick={() => store.update((d) => ({ ...d, radio: false }))}>
+                ラジオを停止
+              </button>
+            )}
           </div>
         </div>
       </section>
       <section className="panel">
-        <h3>今日は、どんな気分？</h3>
-        <div className="chips">
-          {Object.entries(modeLabels).map(([value, label]) => (
+        <h3>おすすめの方向</h3>
+        <div className="chips" role="group" aria-label="おすすめの方向">
+          {([
+            ["balance", "おまかせ"],
+            ["discovery", "新しい曲を多めに"],
+          ] as const).map(([value, label]) => (
             <button
               key={value}
               aria-pressed={data.settings.radioMode === value}
               className={data.settings.radioMode === value ? "selected" : ""}
-              onClick={() => store.settings({ radioMode: value as RadioMode })}
+              onClick={() => {
+                store.settings({ radioMode: value });
+                setCandidates([]);
+              }}
             >
               {label}
             </button>
           ))}
         </div>
-        <label>
-          発見度 · {data.settings.discovery}%
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={data.settings.discovery}
-            onChange={(e) =>
-              store.settings({ discovery: Number(e.target.value) })
-            }
-          />
-        </label>
         <p className="muted">
-          曲名・投稿者・関連動画・お気に入り・聴き方から推薦します。音声の特徴は解析していません。
+          再生履歴やお気に入りをもとに、次のおすすめを自動で探します。変更内容は次の候補から反映されます。
         </p>
+        {data.channels.length > 0 && (
+          <details>
+            <summary>好みに登録した歌い手（{data.channels.length}件）</summary>
+            <p className="muted">好きな歌い手は、ラジオのおすすめに反映されます。</p>
+            {data.channels.map((url) => (
+              <div className="section-heading" key={url}>
+                <span>{Object.values(data.tracks).find((t) => t.uploaderUrl === url)?.uploader || url}</span>
+                <button onClick={() => store.update((d) => ({ ...d, channels: d.channels.filter((v) => v !== url) }))}>
+                  登録解除
+                </button>
+              </div>
+            ))}
+          </details>
+        )}
       </section>
       <div className="section-heading">
         <h2>
@@ -132,9 +139,7 @@ export function Radio({ onAdd }: { onAdd: (ids: string[]) => void }) {
         onAdd={onAdd}
         onPlay={(track) => { void store.startRadio(track); }}
       />
-      {data.radio && (
-        <button onClick={() => void store.fillRadio()}>キューを補充する</button>
-      )}
+
     </>
   );
 }
