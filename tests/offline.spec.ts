@@ -54,7 +54,19 @@ test("offline saved audio survives reload and plays three distinct files through
  await page.goto("./#settings");
  const diag=JSON.parse((await page.getByTestId("playback-diagnostics").textContent())||"{}");
  expect(ids.every(id=>diag.starts.some((s:any)=>s.id===id&&s.source==="local"&&s.startMs>0))).toBe(true);
- await info.attach("offline-actual-playback",{body:JSON.stringify({network:"context.setOffline(true), offline shell reload",originalTones:true,distinct:observed,elapsedMs:Date.now()-start,starts:diag.starts},null,2),contentType:"application/json"});
+ const evidence = {
+  project: info.project.name,
+  network: "context.setOffline(true), offline shell reload",
+  originalTones: true,
+  distinct: observed,
+  elapsedMs: Date.now() - start,
+  starts: diag.starts,
+ };
+ console.log("OFFLINE_PLAYBACK", JSON.stringify(evidence));
+ await info.attach("offline-actual-playback", {
+  body: JSON.stringify(evidence, null, 2),
+  contentType: "application/json",
+ });
  // Repeat/shuffle/seek operate on the same persisted audio while the network is still disabled.
  await page.goto("./#local");await page.getByRole("button",{name:"保存曲を連続再生",exact:true}).click();await advances(page);
  await page.goto("./#playing");

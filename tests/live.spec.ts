@@ -233,6 +233,46 @@ test("ten real YouTube posts: Invidious media, failure skips and radio (no mocks
       report.continuousThreeDistinct = "unmet: 0 playable samples";
     }
     report.diagnostics = await diagnostics();
+    // Verify a public playlist through the same import UI, with no intercepted requests.
+    try {
+      if ((await page.locator(".mini-track").innerText()).includes("再生中")) {
+        await page.locator(".play-toggle").click();
+      }
+      await page.goto("./#import");
+      const id = "PLBCF2DAC6FFB574DE";
+      await page.getByLabel("プレイリストURL", { exact: true }).fill(
+        "https://www.youtube.com/playlist?list=" + id,
+      );
+      const fetchAll = page.getByRole("button", { name: "全ページを自動取得", exact: true });
+      await fetchAll.click();
+      await expect(fetchAll).toBeEnabled({ timeout: 45000 });
+      const summary = await page.locator("main [role=status]").innerText();
+      const count = await page.locator(".preview-list p").count();
+      const result = {
+        id,
+        status: count === 0 ? "BLOCKED" : summary.includes("全ページ取得完了") ? "PASS" : "PARTIAL",
+        summary,
+        receivedTracks: count,
+        registered: false,
+      };
+      report.playlistImport = result;
+      if (count > 0) {
+        const target = page.getByLabel("登録先プレイリスト");
+        const priorOptions = await target.locator("option").count();
+        await target.selectOption("");
+        await page.getByRole("button", { name: "この" + count + "曲を取り込む", exact: true }).click();
+        await expect(target.locator("option")).toHaveCount(priorOptions + 1);
+        await page.reload();
+        await expect(target.locator("option")).toHaveCount(priorOptions + 1);
+        result.registered = true;
+      }
+    } catch (e) {
+      report.playlistImport = {
+        ...(report.playlistImport as object),
+        status: "FAIL",
+        error: String(e).slice(0, 300),
+      };
+    }
   } catch (e) {
     errors.push(String(e));
     report.diagnostics = await diagnostics().catch(() => ({}));

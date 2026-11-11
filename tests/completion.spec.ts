@@ -27,12 +27,16 @@ test("automatic multi-page playlist preview and Japanese changes are usable from
 test("prepared audio buffers are reused and actual starts are timed with prefetch enabled/disabled",async({page},info)=>{
  test.setTimeout(90000);
  const ids=["AAAAAAA0000","AAAAAAA0001","AAAAAAA0002","AAAAAAA0003"];
- const requests:Record<string,number>={};const media=tone(0,20).buffer;
+ const requests: Record<string, number> = {};
+ const requestedAt: Record<string, number> = {};
+ const media = tone(0, 20).buffer;
  await page.route("https://**/*",async r=>{
   const u=new URL(r.request().url());
   if(u.hostname==="audio.fixture.test")return r.fulfill({headers:{"access-control-allow-origin":"*"},contentType:"audio/wav",body:media});
   if(u.pathname.startsWith("/api/v1/videos/")) {
-   const id=u.pathname.split("/").at(-1)!;requests[id]=(requests[id]||0)+1;
+   const id = u.pathname.split("/").at(-1)!;
+   requests[id] = (requests[id] || 0) + 1;
+   requestedAt[id] ??= Date.now();
    await new Promise(resolve=>setTimeout(resolve,500));
    return r.fulfill({headers:{"access-control-allow-origin":"*"},json:{videoId:id,title:id,author:"Fixture",lengthSeconds:20,adaptiveFormats:[{url:`https://audio.fixture.test/${id}.wav`,type:"audio/wav",bitrate:352800}]}});
   }
@@ -52,7 +56,49 @@ test("prepared audio buffers are reused and actual starts are timed with prefetc
   await expect.poll(async()=>(await read()).starts.some((s:any)=>s.id===selected[1])).toBe(true);
   const row=(await read()).starts.find((s:any)=>s.id===selected[1]);expect(row.prefetched).toBe(prefetch);
   if(prefetch)expect(requests[selected[1]]).toBe(before);
-  comparisons.push({...row,apiRequests:requests[selected[1]],controlledFixture:true});
+  const prepared = (await read()).events.find((event: { trackId: string; stage: string; outcome: string }) =>
+   event.trackId === selected[1] && event.stage === "probe" && event.outcome === "success",
+  );
+  comparisons.push({
+   ...row,
+   prepareMs: prepared.at - requestedAt[selected[1]],
+   apiRequests: requests[selected[1]],
+   switchRequests: (requests[selected[1]] || 0) - before,
+   controlledFixture: true,
+  });
  }
+ console.log("PREFETCH_COMPARISON", JSON.stringify({ project: info.project.name, comparisons }));
  await info.attach("prefetch-start-comparison",{body:JSON.stringify(comparisons,null,2),contentType:"application/json"});
+});
+
+test("authorized HTTPS audio download requires consent and preserves the library on a network failure", async ({ page }) => {
+  await page.route("https://owned-audio.fixture.test/**", (route) => {
+    if (route.request().url().includes("failure")) {
+      return route.abort("failed");
+    }
+    return route.fulfill({
+      headers: { "access-control-allow-origin": "*" },
+      contentType: "audio/wav",
+      body: tone(7).buffer,
+    });
+  });
+
+  await page.goto("./#local");
+  await page.getByText("保存が許可されたHTTPS音源から取り込む", { exact: true }).click();
+  const source = page.getByLabel("音声ファイルURL", { exact: true });
+  const save = page.getByRole("button", { name: "許可された音源を保存", exact: true });
+  await source.fill("https://owned-audio.fixture.test/permitted.wav");
+  await expect(save).toBeDisabled();
+  await page.getByRole("checkbox", {
+    name: "この音源のダウンロード・オフライン利用が許可されています",
+    exact: true,
+  }).check();
+  await save.click();
+  await expect(page.locator(".trackrow")).toHaveCount(1);
+  await expect(save).toBeEnabled();
+
+  await source.fill("https://owned-audio.fixture.test/failure.wav");
+  await save.click();
+  await expect(page.getByText(/取得失敗：/)).toBeVisible();
+  await expect(page.locator(".trackrow")).toHaveCount(1);
 });
