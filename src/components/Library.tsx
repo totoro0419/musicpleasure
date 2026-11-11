@@ -39,11 +39,13 @@ export function Library({
   onAdd,
   initialTab = "playlists",
   initialPlaylistUrl,
+  initialTarget,
 }: {
   id?: string;
   onAdd: (ids: string[]) => void;
   initialTab?: "playlists" | "local" | "import";
   initialPlaylistUrl?: string;
+  initialTarget?: string;
 }) {
   const { data } = useStore();
   const [name, setName] = useState("");
@@ -53,6 +55,7 @@ export function Library({
   const [destination, setDestination] = useState("");
   const [merge, setMerge] = useState("");
   const [editing, setEditing] = useState(false);
+  const [coverDraft, setCoverDraft] = useState<string>();
   const [showCommands, setShowCommands] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const p = data.playlists.find((x) => x.id === id);
@@ -176,13 +179,17 @@ export function Library({
                 <label>
                   カバー画像URL
                   <input
-                    value={p.cover.startsWith("data:") ? "" : p.cover}
-                    onChange={(e) => patch({ cover: e.target.value })}
-                    onBlur={(e) => {
-                      if (e.target.value && !safeImage(e.target.value)) {
+                    value={coverDraft ?? (p.cover.startsWith("data:") ? "" : p.cover)}
+                    onChange={(e) => setCoverDraft(e.target.value)}
+                    onBlur={() => {
+                      if (coverDraft === undefined) return;
+                      const url = coverDraft.trim();
+                      setCoverDraft(undefined);
+                      if (url && !safeImage(url)) {
                         store.notify("画像はHTTPS URLを入力してください");
-                        patch({ cover: "" });
+                        return;
                       }
+                      if (url !== p.cover) patch({ cover: url });
                     }}
                   />
                 </label>
@@ -275,7 +282,7 @@ export function Library({
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <a className="button" href="#import">
+          <a className="button" href={`#import/target/${encodeURIComponent(p.id)}`}>
             <Plus size={17} />
             一括登録
           </a>
@@ -425,7 +432,7 @@ export function Library({
         />
       )}
       {tab === "local" && <LocalLibrary onAdd={onAdd} />}
-      {tab === "import" && <ImportPanel initialPlaylistUrl={initialPlaylistUrl} />}
+      {tab === "import" && <ImportPanel initialPlaylistUrl={initialPlaylistUrl} initialTarget={initialTarget} />}
     </>
   );
 }

@@ -195,7 +195,15 @@ test("playlist edit, cover, deletion and undo change saved data", async ({ page 
   await page.getByLabel("説明文", { exact: true }).fill("Saved description");
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+X2GQAAAAASUVORK5CYII=", "base64");
   await page.getByLabel("カバー画像を選ぶ").setInputFiles({ name: "cover.png", mimeType: "image/png", buffer: png });
-  await expect(page.locator("main img[src^='data:image/']")).toBeVisible();
+  const cover = page.locator("main img[src^='data:image/']");
+  await expect(cover).toBeVisible();
+  const originalCover = await cover.getAttribute("src");
+  await page.getByText("画像URLで指定する", { exact: true }).click();
+  const coverUrl = page.getByLabel("カバー画像URL");
+  await coverUrl.fill("not a valid URL");
+  await coverUrl.press("Tab");
+  await expect(page.getByText("画像はHTTPS URLを入力してください")).toBeVisible();
+  await expect(cover).toHaveAttribute("src", originalCover!);
   await page.reload();
   await expect(page.getByRole("heading", { name: "After edit", exact: true })).toBeVisible();
   await expect(page.getByText("Saved description")).toBeVisible();
@@ -208,4 +216,28 @@ test("playlist edit, cover, deletion and undo change saved data", async ({ page 
   await expect(page.locator(".playlist-card")).toContainText("After edit");
   await page.getByRole("button", { name: "やり直す", exact: true }).click();
   await expect(page.locator(".playlist-card")).toHaveCount(0);
+});
+
+
+test("play after the last track naturally ends restarts at the beginning", async ({ page }) => {
+  await mockMusic(page);
+  const data = emptyData();
+  const track = { ...placeholder(ids[0]), title: titles[0], duration: 8 };
+  data.tracks = { [track.id]: track };
+  data.queue = [track.id];
+  data.current = 0;
+  data.position = 5;
+  await page.goto("./#settings");
+  await page.locator("input[type=file]").setInputFiles({
+    name: "position.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(data)),
+  });
+  await page.getByRole("button", { name: "確認して復元" }).click();
+  await expect(page.getByText(/バックアップを復元しました/)).toBeVisible();
+  await page.locator(".play-toggle").click();
+  await expect(page.locator(".mini-track")).toContainText("再生中");
+  await expect(page.locator(".mini-track")).toContainText("再生待ち", { timeout: 14000 });
+  await expect(page.getByLabel("再生位置", { exact: true })).toHaveValue("0");
+  await page.locator(".play-toggle").click();
+  await progresses(page, track.id);
+  expect(Number(await page.getByLabel("再生位置", { exact: true }).inputValue())).toBeLessThan(5);
 });

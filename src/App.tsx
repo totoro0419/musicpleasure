@@ -235,6 +235,9 @@ export default function App() {
   const [addIds, setAddIds] = useState<string[]>([]);
   const [target, setTarget] = useState("");
   const [newName, setNewName] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState("");
+  const addPending = useRef(false);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     void store.init();
@@ -300,6 +303,7 @@ export default function App() {
   function onAdd(ids: string[]) {
     if (!ids.length) return;
     setNewName("");
+    setAddError("");
     setAddIds(ids);
     setTarget(data.playlists[0]?.id || "");
     dialog.current?.showModal();
@@ -331,7 +335,10 @@ export default function App() {
     }).catch(() => store.notify("データを保存できず更新を中断しました。バックアップ後に再試行してください。"));
   }
   const current = data.tracks[data.queue[data.current]];
-  const active = route.split("/")[0];
+  const [active, routeId, importTarget] = route.split("/");
+  const targetPlaylist = active === "import" && routeId === "target"
+    ? data.playlists.find((playlist) => encodeURIComponent(playlist.id) === importTarget)?.id || ""
+    : undefined;
   const navigationActive = ["local", "import", "playlist"].includes(active) ? "library" : active;
   const repeatIcon = data.repeat === "one" ? Repeat1 : Repeat;
   const RepeatIcon = repeatIcon;
@@ -494,8 +501,9 @@ export default function App() {
           ) : ["library", "playlist", "local", "import"].includes(active) ? (
             <Library
               key={route}
-              id={active === "playlist" ? route.split("/")[1] : undefined}
-              initialPlaylistUrl={active === "import" && route.includes("/") ? "https://www.youtube.com/playlist?list=" + route.split("/")[1] : undefined}
+              id={active === "playlist" ? routeId : undefined}
+              initialPlaylistUrl={active === "import" && routeId && targetPlaylist === undefined ? "https://www.youtube.com/playlist?list=" + routeId : undefined}
+              initialTarget={targetPlaylist}
               initialTab={active === "local" ? "local" : active === "import" ? "import" : "playlists"}
               onAdd={onAdd}
             />
@@ -754,12 +762,25 @@ export default function App() {
       </nav>
       <dialog ref={dialog} onCancel={() => setAddIds([])}>
         <form
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
-            let id = target;
-            if (!id) id = store.create(newName || "新しいプレイリスト");
-            store.addToPlaylist(id, addIds);
-            dialog.current?.close();
+            if (addPending.current) return;
+            addPending.current = true;
+            setAdding(true);
+            setAddError("");
+            try {
+              const tracks = addIds.map((id) => store.data.tracks[id]).filter(Boolean);
+              const result = store.addPlaylistTracks(target, newName || "新しいプレイリスト", tracks);
+              setTarget(result.id);
+              await store.flush();
+              store.notify(result.added ? `${result.added}曲をプレイリストへ追加しました` : "選択した曲は登録済みです。");
+              dialog.current?.close();
+            } catch (error) {
+              setAddError(error instanceof Error ? error.message : String(error));
+            } finally {
+              addPending.current = false;
+              setAdding(false);
+            }
           }}
         >
           <div className="section-heading">
@@ -795,8 +816,9 @@ export default function App() {
               />
             </label>
           )}
-          <button className="primary" type="submit">
-            追加する
+          {addError && <p className="error" role="alert">{addError}</p>}
+          <button className="primary" type="submit" disabled={adding}>
+            {adding ? "保存中…" : "追加する"}
           </button>
         </form>
       </dialog>
